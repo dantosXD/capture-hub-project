@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model CaptureItem {
+  id            String   @id @default(cuid())
+  type          String
+  title         String
+  content       String?
+  extractedText String?
+  imageUrl      String?
+  sourceUrl     String?
+  metadata      String?
+  tags          String
+  priority      String   @default("none")
+  status        String   @default("inbox")
+  assignedTo    String?
+  dueDate       String?
+  reminder      String?
+  reminderSent  Boolean  @default(false)
+  pinned        Boolean  @default(false)
+  projectId     String?
+  processedAt   String?
+  processedBy   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  project       Project? @relation(fields: [projectId], references: [id])
+
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+  @@index([projectId])
+  @@index([pinned])
+  @@index([priority])
+  @@index([assignedTo])
+  @@index([processedAt])
+  @@index([updatedAt])
+  @@index([status, pinned, createdAt])
+  @@index([status, createdAt])
+  @@index([status, type])
+  @@index([status, priority])
+  @@index([status, assignedTo])
+  @@index([createdAt, status])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  color       String        @default("#6366f1")
+  icon        String?
+  status      String        @default("active")
+  priority    String        @default("medium")
+  dueDate     String?
+  metadata    String?
+  order       Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  items       CaptureItem[]
+  templates   Template[]
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  content     String
+  category    String   @default("general")
+  icon        String?
+  variables   String?
+  isDefault   Boolean  @default(false)
+  projectId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  project     Project? @relation(fields: [projectId], references: [id])
+}
+
+model ItemLink {
+  id           String  @id @default(cuid())
+  sourceId     String
+  targetId     String
+  relationType String  @default("related")
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@unique([sourceId, targetId])
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([relationType])
+}
+
+model ConnectedDevice {
+  id          String  @id @default(cuid())
+  socketId    String  @unique
+  deviceName  String?
+  deviceType  String?
+  lastSeen    String
+  connectedAt DateTime @default(now())
+
+  @@index([socketId])
+  @@index([lastSeen])
+}

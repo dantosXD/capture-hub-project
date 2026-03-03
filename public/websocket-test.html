@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebSocket Test</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #1a1a2e;
+      color: #eee;
+    }
+    #log {
+      background: #0f0f1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 15px;
+      height: 300px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+    .log-entry {
+      margin: 4px 0;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    .log-info { background: #1e3a5f; }
+    .log-success { background: #1e5f3a; }
+    .log-error { background: #5f1e1e; }
+    button {
+      background: #6366f1;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+    button:hover { background: #4f46e5; }
+    #status {
+      margin: 15px 0;
+      padding: 10px;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+    .connected { background: #1e5f3a; }
+    .disconnected { background: #5f1e1e; }
+  </style>
+</head>
+<body>
+  <h1>WebSocket Connection Test</h1>
+  <div id="status" class="disconnected">Status: Disconnected</div>
+
+  <button onclick="connect()">Connect</button>
+  <button onclick="disconnect()">Disconnect</button>
+  <button onclick="sendPing()">Send Ping</button>
+  <button onclick="clearLog()">Clear Log</button>
+
+  <h3>Event Log:</h3>
+  <div id="log"></div>
+
+  <script>
+    let ws = null;
+    const log = document.getElementById('log');
+    const status = document.getElementById('status');
+
+    function addLog(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function updateStatus(connected) {
+      if (connected) {
+        status.textContent = 'Status: Connected';
+        status.className = 'connected';
+      } else {
+        status.textContent = 'Status: Disconnected';
+        status.className = 'disconnected';
+      }
+    }
+
+    function connect() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        addLog('Already connected', 'info');
+        return;
+      }
+
+      addLog('Connecting to ws://localhost:3005/ws...', 'info');
+
+      ws = new WebSocket('ws://localhost:3005/ws');
+
+      ws.onopen = () => {
+        addLog('✓ WebSocket connection established', 'success');
+        updateStatus(true);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          addLog(`✓ Received: ${data.type} ${JSON.stringify(data.data || '').substring(0, 50)}`, 'success');
+        } catch (e) {
+          addLog(`✓ Received (raw): ${event.data}`, 'success');
+        }
+      };
+
+      ws.onerror = (error) => {
+        addLog(`✗ WebSocket error: ${error}`, 'error');
+        updateStatus(false);
+      };
+
+      ws.onclose = () => {
+        addLog('✗ WebSocket connection closed', 'error');
+        updateStatus(false);
+      };
+    }
+
+    function disconnect() {
+      if (ws) {
+        ws.close();
+        addLog('Disconnected by user', 'info');
+      }
+    }
+
+    function sendPing() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+        addLog('Sent: ping', 'info');
+      } else {
+        addLog('✗ Not connected', 'error');
+      }
+    }
+
+    function clearLog() {
+      log.innerHTML = '';
+    }
+
+    // Auto-connect on page load
+    setTimeout(connect, 500);
+  </script>
+</body>
+</html>

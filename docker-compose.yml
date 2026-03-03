@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  capture-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: capture-hub-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./prisma:/app/prisma
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/prisma/dev.db
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - NEXT_PUBLIC_WS_URL=ws://localhost:3000/ws
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - capture-hub-network
+
+networks:
+  capture-hub-network:
+    driver: bridge

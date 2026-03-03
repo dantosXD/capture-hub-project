@@ -1,0 +1,166 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment variables
+.env
+.env.local
+.env.test
+.env.test.*
+.env.production
+.env.*.local
+
+# Database files
+prisma/dev.db
+prisma/dev.db-journal
+prisma/*.db
+prisma/*.db-journal
+*.db
+*.db-journal
+
+# Playwright artifacts
+.playwright-cli/
+.playwright/
+.playwright-cli-cmd
+playwright-report/
+test-results/
+
+# Logs
+*.log
+dev-test*.log
+dev-test-server.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / local tool settings
+.vscode/
+.idea/
+.windsurf/
+.claude/settings.local.json
+
+# Test/debug screenshots and artifacts
+api-*.png
+ux-screenshots/
+page.html
+
+# Temp helper scripts (not part of the app)
+tmpclaude-*
+kill-port*.js
+kill-port*.sh
+kill-port*.bat
+kill-port*.ps1
+capture-ux-screenshots.js
+
+# Build artifacts
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Misc log/temp paths committed accidentally
+"C*"
+
+# Dev server logs and PIDs
+dev-*.log
+dev_*.log
+dev-*.pid
+dev_*.pid
+debug-*.log
+ws-test-server.log
+*.pid
+
+# QA/verification scripts generated during development
+verify-*.mjs
+verify-*.js
+verify-*.ts
+verify-*.sh
+verify-*.md
+check-*.mjs
+check-*.js
+check-*.sql
+check-*.ts
+check-schema.js
+create-test-*.mjs
+create-gtd-*.mjs
+cleanup-*.js
+wait-and-test.mjs
+
+# Claude/AI agent session artifacts
+claude-progress*.txt
+claude-progress*.bak
+SESSION_SUMMARY*.md
+REGRESSION_TEST*.md
+REGRESSION*.md
+FEATURE-*.md
+FEATURE_*.md
+FEATURE*.md
+VERIFICATION_*.md
+VERIFICATION_*.ts
+VERIFICATION_*.mjs
+
+# app_spec / autoforge prompts (local only)
+app_spec.txt
+
+# One-off server management / restart scripts
+start-*.sh
+start-*.bat
+start-*.js
+stop-*.sh
+stop-*.bat
+restart-*.sh
+restart-*.bat
+restart-*.mjs
+restart-*.js
+restart-*.md
+restart-*.json
+full-restart-*.sh
+full-restart-*.mjs
+start_server.sh
+stop-server*.sh
+kill_port*.bat
+kill-*.js
+kill-*.mjs
+kill-all-node.mjs
+find-server.mjs
+
+# Session / progress notes
+session-*.txt
+session-*.md
+session-*.json
+claude-progress*.txt
+
+# Test artifacts / one-off test scripts (keep only *.spec.ts and src/test/)
+test-*.mjs
+test-*.cjs
+test-*.py
+test-*.html
+test-*.sql
+test-*.js
+test-*.ts
+!test-*.spec.ts
+test-*.json
+test_connection.txt
+test-results/
+health-error.json
+health-result.json
+schema-test-result.json
+regression-test-*.md
+regression-test-*.json
+REGRESSION*.md
+restart-persistence-verification.md
+
+# Misc one-off scripts
+feature-verification.txt
+restart_test.sh
+reduce-inbox-to-5.js
+merge-databases.sql
+take-screenshot.mjs
+simple-ws-test.js
+update-priority-badges.js
+validate-*.mjs
+f162-*.mjs
+final-*.mjs
+dev.db

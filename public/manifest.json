@@ -1,0 +1,65 @@
+{
+  "name": "Capture Hub",
+  "short_name": "CaptureHub",
+  "description": "AI-powered capture hub for ideas, screenshots, and web content",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Quick Capture",
+      "short_name": "Capture",
+      "description": "Quickly capture a new note",
+      "url": "/?action=capture",
+      "icons": [{ "src": "/icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "OCR Tool",
+      "short_name": "OCR",
+      "description": "Extract text from images",
+      "url": "/?action=ocr",
+      "icons": [{ "src": "/icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Screenshot",
+      "short_name": "Screenshot",
+      "description": "Capture and annotate screenshots",
+      "url": "/?action=screenshot",
+      "icons": [{ "src": "/icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Web Capture",
+      "short_name": "Web",
+      "description": "Capture web page content",
+      "url": "/?action=web",
+      "icons": [{ "src": "/icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Scratchpad",
+      "short_name": "Scratchpad",
+      "description": "Open markdown scratchpad",
+      "url": "/?action=scratchpad",
+      "icons": [{ "src": "/icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "View Inbox",
+      "short_name": "Inbox",
+      "description": "View your inbox items",
+      "url": "/?view=inbox",
+      "icons": [{ "src": "/icon.png", "sizes": "96x96" }]
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
