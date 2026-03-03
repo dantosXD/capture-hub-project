@@ -126,7 +126,7 @@ const statusOptions = [
 ];
 
 const assignOptions = [
-  { value: '', label: 'Unassigned' },
+  { value: 'none', label: 'Unassigned' },
   { value: 'Projects', label: 'Projects' },
   { value: 'Tasks', label: 'Tasks' },
   { value: 'Review', label: 'Review' },
@@ -289,7 +289,7 @@ export function ItemPreview({
           tags,
           priority,
           status,
-          assignedTo: assignedTo || null,
+          assignedTo: (assignedTo && assignedTo !== 'none') ? assignedTo : null,
           projectId: projectId || null,
           dueDate: dueDate || null,
           reminder: reminder || null,
@@ -697,15 +697,15 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Project</label>
                 <Select
-                  value={projectId || ''}
-                  onValueChange={(value) => setProjectId(value || null)}
+                  value={projectId || 'none'}
+                  onValueChange={(value) => setProjectId(value === 'none' ? null : value)}
                   disabled={loadingProjects}
                 >
                   <SelectTrigger className="h-8">
                     <SelectValue placeholder="No project" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No project</SelectItem>
+                    <SelectItem value="none">No project</SelectItem>
                     {projects.map((project) => (
                       <SelectItem key={project.id} value={project.id}>
                         <div className="flex items-center gap-2">

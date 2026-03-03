@@ -67,7 +67,7 @@ interface Project {
 }
 
 const assignOptions = [
-  { value: '', label: 'Unassigned' },
+  { value: 'none', label: 'Unassigned' },
   { value: 'Projects', label: 'Projects' },
   { value: 'Tasks', label: 'Tasks' },
   { value: 'Review', label: 'Review' },
@@ -328,12 +328,12 @@ export function ProcessingWorkflow({ staleItems, onSelectItem, onNavigate }: Pro
       };
 
       // Only set assignedTo if a value is selected
-      if (selectedAssignedTo) {
+      if (selectedAssignedTo && selectedAssignedTo !== 'none') {
         updateData.assignedTo = selectedAssignedTo;
       }
 
       // Only set projectId if a value is selected
-      if (selectedProjectId) {
+      if (selectedProjectId && selectedProjectId !== 'none') {
         updateData.projectId = selectedProjectId;
       }
 
@@ -778,7 +778,7 @@ export function ProcessingWorkflow({ staleItems, onSelectItem, onNavigate }: Pro
                           <SelectValue placeholder={loadingProjects ? 'Loading...' : 'Select project'} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">No project</SelectItem>
+                          <SelectItem value="none">No project</SelectItem>
                           {projects.map((project) => (
                             <SelectItem key={project.id} value={project.id}>
                               <div className="flex items-center gap-2">
@@ -805,7 +805,7 @@ export function ProcessingWorkflow({ staleItems, onSelectItem, onNavigate }: Pro
                       <Button
                         className="flex-1"
                         onClick={handleAssignConfirm}
-                        disabled={!selectedAssignedTo && !selectedProjectId}
+                        disabled={(!selectedAssignedTo || selectedAssignedTo === 'none') && (!selectedProjectId || selectedProjectId === 'none')}
                       >
                         Assign
                       </Button>

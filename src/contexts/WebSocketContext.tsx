@@ -51,7 +51,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   // WebSocket URL - use NEXT_PUBLIC_WS_URL env var if set, otherwise auto-detect from window.location
   const wsUrl = typeof window !== 'undefined'
-    ? (process.env.NEXT_PUBLIC_WS_URL || `ws://${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}/ws`)
+    ? (process.env.NEXT_PUBLIC_WS_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}/ws`)
     : '';
 
   const getReconnectDelay = useCallback((attempt: number): number => {

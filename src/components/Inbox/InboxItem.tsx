@@ -116,23 +116,18 @@ export function InboxItem({
     );
   };
 
+  const [faviconError, setFaviconError] = useState(false);
+
   const getIconDisplay = () => {
     // For webpages, show favicon if available
-    if (item.type === 'webpage' && item.imageUrl) {
+    if (item.type === 'webpage' && item.imageUrl && !faviconError) {
       return (
         <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
           <img
             src={item.imageUrl}
             alt=""
             className="w-6 h-6 object-contain"
-            onError={(e) => {
-              // Fallback to default icon if favicon fails to load
-              e.currentTarget.style.display = 'none';
-              const parent = e.currentTarget.parentElement;
-              if (parent) {
-                parent.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-foreground"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
-              }
-            }}
+            onError={() => setFaviconError(true)}
           />
         </div>
       );
