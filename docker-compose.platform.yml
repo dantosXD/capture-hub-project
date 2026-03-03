@@ -1,0 +1,96 @@
+# ==============================================================================
+# Platform Infrastructure (Project Omni P2)
+# PostgreSQL + pgvector + Redis + App
+# Usage: docker compose -f docker-compose.platform.yml up -d
+# ==============================================================================
+
+services:
+  # ============================================================================
+  # PostgreSQL with pgvector extension (DistSQL-ready)
+  # ============================================================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: capture-hub-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-capture_hub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-capture_hub_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-capture_hub}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-capture_hub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - capture-hub-platform
+
+  # ============================================================================
+  # Redis (Event mesh backing store + cache + rate limiting)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: capture-hub-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - capture-hub-platform
+
+  # ============================================================================
+  # Capture Hub Application
+  # ============================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: capture-hub-app
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-capture_hub}:${POSTGRES_PASSWORD:-capture_hub_dev}@postgres:5432/${POSTGRES_DB:-capture_hub}?schema=public
+      - REDIS_URL=redis://redis:6379
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:3000/ws}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - capture-hub-platform
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  capture-hub-platform:
+    driver: bridge

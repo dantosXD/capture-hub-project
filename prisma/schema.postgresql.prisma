@@ -1,0 +1,172 @@
+// ==============================================================================
+// Prisma Schema - PostgreSQL + pgvector (Project Omni P2)
+// This schema extends the base schema with PostgreSQL-specific features:
+// - Native UUID generation
+// - pgvector embeddings for RAG
+// - Full-text search indexes
+// - JSON columns instead of stringified JSON
+//
+// Usage: Set DATABASE_PROVIDER=postgresql in .env, then:
+//   npx prisma migrate dev --schema prisma/schema.postgresql.prisma
+// ==============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, pg_trgm, uuid_ossp(map: "uuid-ossp")]
+}
+
+model CaptureItem {
+  id            String   @id @default(cuid())
+  type          String
+  title         String
+  content       String?
+  extractedText String?
+  imageUrl      String?
+  sourceUrl     String?
+  metadata      Json?
+  tags          String
+  priority      String   @default("none")
+  status        String   @default("inbox")
+  assignedTo    String?
+  dueDate       String?
+  reminder      String?
+  reminderSent  Boolean  @default(false)
+  pinned        Boolean  @default(false)
+  projectId     String?
+  processedAt   String?
+  processedBy   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  project       Project? @relation(fields: [projectId], references: [id])
+
+  // Embeddings for RAG (populated by AI pipeline)
+  embedding     Embedding?
+
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+  @@index([projectId])
+  @@index([pinned])
+  @@index([priority])
+  @@index([assignedTo])
+  @@index([processedAt])
+  @@index([updatedAt])
+  @@index([status, pinned, createdAt])
+  @@index([status, createdAt])
+  @@index([status, type])
+  @@index([status, priority])
+  @@index([status, assignedTo])
+  @@index([createdAt, status])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  color       String        @default("#6366f1")
+  icon        String?
+  status      String        @default("active")
+  priority    String        @default("medium")
+  dueDate     String?
+  metadata    Json?
+  order       Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  items       CaptureItem[]
+  templates   Template[]
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  content     String
+  category    String   @default("general")
+  icon        String?
+  variables   Json?
+  isDefault   Boolean  @default(false)
+  projectId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  project     Project? @relation(fields: [projectId], references: [id])
+}
+
+model ItemLink {
+  id           String   @id @default(cuid())
+  sourceId     String
+  targetId     String
+  relationType String   @default("related")
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@unique([sourceId, targetId])
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([relationType])
+}
+
+model ConnectedDevice {
+  id          String   @id @default(cuid())
+  socketId    String   @unique
+  deviceName  String?
+  deviceType  String?
+  lastSeen    String
+  connectedAt DateTime @default(now())
+
+  @@index([socketId])
+  @@index([lastSeen])
+}
+
+// ==============================================================================
+// Vector Embedding Storage (pgvector)
+// ==============================================================================
+
+model Embedding {
+  id          String   @id @default(cuid())
+  itemId      String   @unique
+  item        CaptureItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  // Vector embedding (1536 dimensions for OpenAI ada-002, adjustable)
+  // Stored as float array; pgvector operations done via raw SQL
+  vector      Unsupported("vector(1536)")?
+
+  // Metadata about the embedding
+  model       String   @default("text-embedding-ada-002")
+  dimensions  Int      @default(1536)
+  tokenCount  Int?
+  contentHash String?  // Hash of source content to detect staleness
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([itemId])
+  @@index([model])
+}
+
+// ==============================================================================
+// Event Outbox (Transactional outbox pattern for reliable event delivery)
+// ==============================================================================
+
+model EventOutbox {
+  id            String   @id @default(cuid())
+  eventType     String
+  payload       Json
+  metadata      Json
+  status        String   @default("pending") // pending, published, failed
+  retryCount    Int      @default(0)
+  maxRetries    Int      @default(3)
+  lastError     String?
+  createdAt     DateTime @default(now())
+  publishedAt   DateTime?
+  nextRetryAt   DateTime?
+
+  @@index([status, createdAt])
+  @@index([status, nextRetryAt])
+  @@index([eventType])
+}

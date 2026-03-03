@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { isWebSocketServerRunning, getConnectedDevicesCount } from "@/lib/websocket";
 import { apiError, classifyError } from "@/lib/api-route-handler";
+import { getProviderStatus } from "@/ai/provider-registry";
+import { getEmbeddingStats } from "@/ai/embedding-pipeline";
+import { getRAGStatus } from "@/ai/rag-engine";
+import { detectDatabaseProvider } from "@/lib/db-config";
+import { isAIConfigured } from "@/lib/ai";
 
 export async function GET() {
   try {
@@ -23,16 +28,36 @@ export async function GET() {
     const wsStatus = wsRunning ? "running" : "not_running";
     const connectedDevices = getConnectedDevicesCount();
 
+    // AI provider status (Project Omni P4)
+    const aiProvider = getProviderStatus();
+    const embeddingStats = getEmbeddingStats();
+    const ragStatus = getRAGStatus();
+
+    // Database provider info (Project Omni P2)
+    const dbProvider = detectDatabaseProvider();
+
     return NextResponse.json({
       status: "healthy",
       database: {
         status: dbStatus,
+        provider: dbProvider,
         tables: tables
       },
       websocket: {
         status: wsStatus,
         connectedDevices: connectedDevices,
         path: "/ws"
+      },
+      ai: {
+        configured: isAIConfigured(),
+        provider: aiProvider.defaultProvider,
+        availableProviders: aiProvider.availableProviders,
+        embeddings: embeddingStats,
+        rag: ragStatus,
+      },
+      omni: {
+        version: "1.0.0",
+        modules: ["contracts", "platform", "ai", "ux-hooks"],
       }
     });
   } catch (error) {

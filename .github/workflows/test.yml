@@ -35,6 +35,11 @@ jobs:
           DATABASE_URL: file:./dev.db
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
 
+      - name: Run Omni module tests (contracts, platform, AI, UX)
+        run: bunx vitest run src/contracts/contracts.test.ts src/lib/platform.test.ts src/ai/ai.test.ts src/hooks/ux-hooks.test.ts
+        env:
+          DATABASE_URL: file:./dev.db
+
       - name: Generate coverage report
         run: bun run test:coverage
         env:

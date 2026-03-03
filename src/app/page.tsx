@@ -544,7 +544,7 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
           id="tabpanel"
           role="tabpanel"
           aria-label={`${activeView} view`}
-          className="bg-card rounded-2xl border shadow-sm overflow-hidden min-h-[calc(100vh-220px)] relative"
+          className="bg-card rounded-2xl border shadow-sm overflow-y-auto min-h-[calc(100vh-220px)] relative"
         >
           <AnimatePresence mode="wait">
             <motion.div
@@ -553,7 +553,7 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-              className="absolute inset-0"
+              className="min-h-full"
             >
               {activeView === 'dashboard' ? (
                 <SectionErrorWrapper sectionName="Dashboard">
