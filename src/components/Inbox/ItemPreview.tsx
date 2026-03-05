@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { safeParseTags } from '@/lib/parse-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { AITextarea } from '@/components/ui/ai-writing-toolbar';
@@ -158,7 +159,7 @@ export function ItemPreview({
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(item.title);
   const [content, setContent] = useState(item.content || '');
-  const [tags, setTags] = useState<string[]>(item.tags);
+  const [tags, setTags] = useState<string[]>(Array.isArray(item.tags) ? item.tags : safeParseTags(item.tags as unknown as string));
   const [tagInput, setTagInput] = useState('');
   const [priority, setPriority] = useState(item.priority);
   const [status, setStatus] = useState(item.status);
@@ -291,7 +292,7 @@ export function ItemPreview({
         body: JSON.stringify({
           title,
           content: content || null,
-          tags,
+          tags: Array.isArray(tags) ? tags : safeParseTags(tags as unknown as string),
           priority,
           status,
           assignedTo: (assignedTo && assignedTo !== 'none') ? assignedTo : null,
@@ -301,14 +302,17 @@ export function ItemPreview({
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to save');
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.error || `Save failed (${response.status})`);
+      }
 
       toast.success('Changes saved');
       setEditing(false);
       onUpdate();
       fetchLinks(); // Refresh links after update
-    } catch {
-      toast.error('Failed to save changes');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save changes');
     } finally {
       setSaving(false);
     }

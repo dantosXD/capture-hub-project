@@ -59,6 +59,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { useBodyScrollLock } from '@/hooks/use-body-scroll-lock';
 import { WSEventType } from '@/lib/ws-events';
 import { fetchWithRetry, showApiErrorToast, parseApiError } from '@/lib/api-error-handler';
+import { safeParseTags, safeParseJSON } from '@/lib/parse-utils';
 import { InboxListSkeleton } from '@/components/LoadingStates/InboxListSkeleton';
 import { ItemPreviewSkeleton } from '@/components/LoadingStates/ItemPreviewSkeleton';
 import { EmptyState } from '@/components/EmptyState';
@@ -318,8 +319,14 @@ export function InboxList({
       setItems((prev) => {
         const updated = prev.map((item) => {
           if (item.id === id) {
-            // Apply the changes to the item
-            const updatedItem = { ...item, ...changes, updatedAt };
+            // Apply the changes to the item, parsing tags/metadata from DB-format strings
+            const updatedItem = {
+              ...item,
+              ...changes,
+              updatedAt,
+              ...(changes.tags !== undefined ? { tags: Array.isArray(changes.tags) ? changes.tags : safeParseTags(changes.tags) } : {}),
+              ...(changes.metadata !== undefined ? { metadata: typeof changes.metadata === 'string' ? safeParseJSON(changes.metadata) : changes.metadata } : {}),
+            };
             return updatedItem;
           }
           return item;
@@ -383,7 +390,13 @@ export function InboxList({
           setPreviewItem(null);
           onPreviewItem?.(null);
         } else {
-          setPreviewItem((prev) => prev ? { ...prev, ...changes, updatedAt } : null);
+          setPreviewItem((prev) => prev ? {
+            ...prev,
+            ...changes,
+            updatedAt,
+            ...(changes.tags !== undefined ? { tags: Array.isArray(changes.tags) ? changes.tags : safeParseTags(changes.tags) } : {}),
+            ...(changes.metadata !== undefined ? { metadata: typeof changes.metadata === 'string' ? safeParseJSON(changes.metadata) : changes.metadata } : {}),
+          } : null);
         }
       }
     });
@@ -493,7 +506,13 @@ export function InboxList({
           setPreviewItem(null);
           onPreviewItem?.(null);
         } else {
-          setPreviewItem((prev) => prev ? { ...prev, ...changes, updatedAt } : null);
+          setPreviewItem((prev) => prev ? {
+            ...prev,
+            ...changes,
+            updatedAt,
+            ...(changes.tags !== undefined ? { tags: Array.isArray(changes.tags) ? changes.tags : safeParseTags(changes.tags) } : {}),
+            ...(changes.metadata !== undefined ? { metadata: typeof changes.metadata === 'string' ? safeParseJSON(changes.metadata) : changes.metadata } : {}),
+          } : null);
         }
       }
 
