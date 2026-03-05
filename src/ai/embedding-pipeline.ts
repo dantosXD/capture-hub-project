@@ -10,12 +10,11 @@
  *   EventBus(item.created/updated) → auto-embed (async, non-blocking)
  */
 
-import { getProvider } from './provider-registry';
 import { detectDatabaseProvider } from '@/lib/db-config';
 import { eventBus } from '@/contracts/event-bus';
 import { EventType } from '@/contracts/events';
-import type { EmbeddingResult } from './types';
 import { createHash } from 'node:crypto';
+import { executeEmbedding } from './runtime';
 
 // ============================================================================
 // In-Memory Embedding Cache (SQLite fallback)
@@ -86,12 +85,10 @@ export async function generateEmbedding(text: string): Promise<{
   dimensions: number;
   tokenCount?: number;
 }> {
-  const provider = getProvider();
-
   // Truncate text to avoid token limits (roughly 8000 tokens ≈ 32000 chars)
   const truncated = text.length > 32000 ? text.substring(0, 32000) : text;
 
-  const result: EmbeddingResult = await provider.embed({ input: truncated });
+  const { result } = await executeEmbedding({ input: truncated });
 
   return {
     vector: result.embeddings[0],
@@ -108,12 +105,10 @@ export async function generateEmbeddingsBatch(texts: string[]): Promise<{
   embeddings: Array<{ vector: number[]; model: string; dimensions: number }>;
   totalTokens: number;
 }> {
-  const provider = getProvider();
-
   // Truncate each text
   const truncated = texts.map(t => t.length > 32000 ? t.substring(0, 32000) : t);
 
-  const result: EmbeddingResult = await provider.embed({ input: truncated });
+  const { result } = await executeEmbedding({ input: truncated });
 
   return {
     embeddings: result.embeddings.map(vector => ({

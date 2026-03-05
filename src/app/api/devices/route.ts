@@ -22,13 +22,15 @@ export async function GET(request: NextRequest) {
       orderBy: { connectedAt: 'desc' }
     });
 
-    // Consolidate: single devices array with connected: boolean per device
     const devices = dbDevices.map(device => ({
       ...device,
       connected: connectedSocketIds.has(device.socketId),
-    }));
+    })).filter((device) => device.connected);
 
-    return NextResponse.json({ devices });
+    return NextResponse.json({
+      devices,
+      connectedCount: devices.length,
+    });
   } catch (error) {
     const { message, status, details } = classifyError(error);
     const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;

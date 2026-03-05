@@ -95,7 +95,13 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     setStatus('connecting');
 
     try {
-      const ws = new WebSocket(wsUrl);
+      const deviceNameQuery = (() => {
+        if (typeof window === 'undefined') return '';
+        const savedDeviceName = window.localStorage.getItem('capture-hub-device-name')?.trim();
+        return savedDeviceName ? `?deviceName=${encodeURIComponent(savedDeviceName)}` : '';
+      })();
+
+      const ws = new WebSocket(`${wsUrl}${deviceNameQuery}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -290,6 +296,17 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    const handleDeviceNameUpdate = () => {
+      reconnect();
+    };
+
+    window.addEventListener('capture-hub:device-name-updated', handleDeviceNameUpdate);
+    return () => {
+      window.removeEventListener('capture-hub:device-name-updated', handleDeviceNameUpdate);
+    };
+  }, [reconnect]);
 
   const value = useMemo<WebSocketContextValue>(() => ({
     socket: wsRef.current,

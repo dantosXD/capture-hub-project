@@ -175,7 +175,7 @@ class APIClient {
   async search(query: string, options: { aiEnhanced?: boolean } = {}): Promise<any> {
     const params = new URLSearchParams({
       q: query,
-      ...(options.aiEnhanced && { ai: 'true' }),
+      ...(options.aiEnhanced && { aiEnhanced: 'true' }),
     });
     return this.request(`/api/search?${params}`, {
       method: 'GET',

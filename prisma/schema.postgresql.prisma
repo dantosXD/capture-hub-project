@@ -21,6 +21,18 @@ datasource db {
   extensions = [vector, pg_trgm, uuid_ossp(map: "uuid-ossp")]
 }
 
+enum AIProviderType {
+  OPENAI_COMPATIBLE
+  ZAI
+}
+
+enum AIHealthStatus {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  FAILED
+}
+
 model CaptureItem {
   id            String   @id @default(cuid())
   type          String
@@ -121,6 +133,50 @@ model ConnectedDevice {
 
   @@index([socketId])
   @@index([lastSeen])
+}
+
+model AIConnection {
+  id                String         @id @default(cuid())
+  label             String
+  providerType      AIProviderType @default(OPENAI_COMPATIBLE)
+  baseUrl           String?
+  apiKeyEncrypted   String?
+  apiKeyHint        String?
+  isLocal           Boolean        @default(false)
+  enabled           Boolean        @default(true)
+  chatModel         String?
+  visionModel       String?
+  embeddingModel    String?
+  lastHealthStatus  AIHealthStatus @default(UNKNOWN)
+  lastHealthMessage String?
+  lastHealthCheckAt DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  appConfigDefault   AppConfig[] @relation("DefaultAIConnection")
+  appConfigVision    AppConfig[] @relation("VisionAIConnection")
+  appConfigEmbedding AppConfig[] @relation("EmbeddingAIConnection")
+
+  @@index([enabled, providerType])
+  @@index([createdAt])
+}
+
+model AppConfig {
+  id                     String        @id @default("singleton")
+  defaultAIConnectionId  String?
+  visionAIConnectionId   String?
+  embeddingAIConnectionId String?
+  aiFallbackEnabled      Boolean       @default(true)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  defaultAIConnection    AIConnection? @relation("DefaultAIConnection", fields: [defaultAIConnectionId], references: [id], onDelete: SetNull)
+  visionAIConnection     AIConnection? @relation("VisionAIConnection", fields: [visionAIConnectionId], references: [id], onDelete: SetNull)
+  embeddingAIConnection  AIConnection? @relation("EmbeddingAIConnection", fields: [embeddingAIConnectionId], references: [id], onDelete: SetNull)
+
+  @@index([defaultAIConnectionId])
+  @@index([visionAIConnectionId])
+  @@index([embeddingAIConnectionId])
 }
 
 // ==============================================================================

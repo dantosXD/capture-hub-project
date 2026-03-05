@@ -49,9 +49,26 @@ export function SearchBar({ onSearch, onResultClick }: SearchBarProps) {
   const [loading, setLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [useAI, setUseAI] = useState(false);
+  const [aiAvailable, setAiAvailable] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    fetch('/api/health')
+      .then((response) => response.json())
+      .then((data) => {
+        const available = data.ai?.capabilities?.chat === true || data.aiConfigured === true;
+        setAiAvailable(available);
+        if (!available) {
+          setUseAI(false);
+        }
+      })
+      .catch(() => {
+        setAiAvailable(false);
+        setUseAI(false);
+      });
+  }, []);
 
   // Debounced search
   useEffect(() => {
@@ -106,7 +123,7 @@ export function SearchBar({ onSearch, onResultClick }: SearchBarProps) {
     try {
       const params = new URLSearchParams();
       params.set('q', query);
-      if (useAI) params.set('ai', 'true');
+      if (useAI) params.set('aiEnhanced', 'true');
 
       const response = await fetch(`/api/search?${params}`, {
         signal: abortController.signal,
@@ -162,8 +179,9 @@ export function SearchBar({ onSearch, onResultClick }: SearchBarProps) {
             variant={useAI ? "default" : "ghost"}
             size="sm"
             className="h-7 px-2"
-            onClick={() => setUseAI(!useAI)}
-            title="AI-enhanced search"
+            onClick={() => aiAvailable && setUseAI(!useAI)}
+            title={aiAvailable ? 'AI-enhanced search' : 'Configure chat AI in Settings to enable semantic search'}
+            disabled={!aiAvailable}
           >
             <Sparkles className={`w-3.5 h-3.5 ${useAI ? 'text-primary-foreground' : ''}`} />
           </Button>
@@ -237,7 +255,7 @@ export function SearchBar({ onSearch, onResultClick }: SearchBarProps) {
             {/* Search Footer */}
             <div className="px-3 py-2 border-t text-xs text-muted-foreground flex items-center justify-between">
               <span>{results.length} results</span>
-              {useAI && (
+              {useAI && aiAvailable && (
                 <Badge variant="outline" className="text-xs">
                   <Sparkles className="w-3 h-3 mr-1" />
                   AI Enhanced

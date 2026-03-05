@@ -16,6 +16,13 @@ type WSServerWithClients = WebSocketServer & {
   broadcast: (type: string, data: any, excludeSocket?: WebSocket) => void;
 };
 
+function sanitizeDeviceName(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 60);
+}
+
 // Use globalThis to make the WebSocket server accessible across the entire process
 const globalForWebSocket = globalThis as unknown as {
   wsServer: WSServerWithClients | null | undefined;
@@ -91,9 +98,11 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
     // Generate socket ID
     const socketId = `socket_${randomUUID()}`;
 
+    const requestUrl = new URL(req.url || '', `http://${req.headers.host}`);
+
     // Get user agent for device name
     const userAgent = req.headers['user-agent'] || 'Unknown';
-    const deviceName = parseDeviceName(userAgent);
+    const deviceName = sanitizeDeviceName(requestUrl.searchParams.get('deviceName')) || parseDeviceName(userAgent);
     const deviceType = parseDeviceType(userAgent);
     const connectedAt = new Date().toISOString();
 

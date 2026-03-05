@@ -37,8 +37,8 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type');
     const status = searchParams.get('status');
     const limit = parseInt(searchParams.get('limit') || '20');
-    // Single canonical param: 'aiEnhanced' — 'ai' alias removed
-    const aiEnhanced = searchParams.get('aiEnhanced') === 'true';
+    // Canonical param is 'aiEnhanced', but keep 'ai' as a temporary alias for compatibility.
+    const aiEnhanced = searchParams.get('aiEnhanced') === 'true' || searchParams.get('ai') === 'true';
     const useAI = aiEnhanced;
 
     // Sanitize query using the shared utility from parse-utils

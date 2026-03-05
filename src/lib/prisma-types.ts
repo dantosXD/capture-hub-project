@@ -16,6 +16,10 @@ export type {
   Template,
   ItemLink,
   ConnectedDevice,
+  AIConnection,
+  AppConfig,
+  AIProviderType,
+  AIHealthStatus,
 } from '@prisma/client';
 
 // Convenience type aliases for common use cases
@@ -46,6 +50,16 @@ export type ItemLinkCreateInput = Prisma.ItemLinkUncheckedCreateInput;
 // ConnectedDevice types
 export type ConnectedDeviceWhereInput = Prisma.ConnectedDeviceWhereInput;
 export type ConnectedDeviceCreateInput = Prisma.ConnectedDeviceUncheckedCreateInput;
+
+// AI connection types
+export type AIConnectionWhereInput = Prisma.AIConnectionWhereInput;
+export type AIConnectionCreateInput = Prisma.AIConnectionUncheckedCreateInput;
+export type AIConnectionUpdateInput = Prisma.AIConnectionUncheckedUpdateInput;
+
+// AppConfig types
+export type AppConfigWhereInput = Prisma.AppConfigWhereInput;
+export type AppConfigCreateInput = Prisma.AppConfigUncheckedCreateInput;
+export type AppConfigUpdateInput = Prisma.AppConfigUncheckedUpdateInput;
 
 // SortOrder re-export for convenience
 export type SortOrder = Prisma.SortOrder;

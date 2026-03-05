@@ -26,6 +26,7 @@ import {
   Play,
   ChevronRight,
   RefreshCw,
+  Globe,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -44,6 +45,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { WSEventType } from '@/lib/ws-events';
 import { DashboardContentSkeleton } from '@/components/LoadingStates/DashboardStatsSkeleton';
 import { ItemConnections } from './ItemConnections';
+import { AskCaptureHub } from './AskCaptureHub';
 
 interface DashboardStats {
   total: number;
@@ -92,6 +94,9 @@ interface DashboardData {
     archiveRate: number;
     staleRate: number;
   };
+  isFirstRun: boolean;
+  untaggedItems: number;
+  itemsWithoutProjects: number;
 }
 
 interface AIDashboardProps {
@@ -124,10 +129,13 @@ const defaultData: DashboardData = {
   weeklyData: [],
   projects: [],
   productivity: { capturesPerDay: 0, archiveRate: 0, staleRate: 0 },
+  isFirstRun: false,
+  untaggedItems: 0,
+  itemsWithoutProjects: 0,
 };
 
 const DASHBOARD_TAB_STORAGE_KEY = 'capture-hub-dashboard-tab';
-const VALID_TABS = ['overview', 'workflow', 'analytics', 'projects'];
+const VALID_TABS = ['overview', 'workflow', 'kanban', 'analytics', 'projects'];
 
 function getPersistedTab(): string {
   if (typeof window === 'undefined') return 'overview';
@@ -156,6 +164,8 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
   const [loading, setLoading] = useState(true);
   const isInitialLoadRef = useRef(true);
   const [error, setError] = useState(false);
+  const [showSlowLoadHint, setShowSlowLoadHint] = useState(false);
+  const [aiEnhancing, setAiEnhancing] = useState(false);
   const [activeTab, setActiveTab] = useState(getPersistedTab);
   const { on: onWsEvent } = useWebSocket();
 
@@ -166,29 +176,62 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
   }, []);
 
   const fetchInsights = useCallback(async () => {
-    // Only show full skeleton on initial load, not on re-fetches
     if (isInitialLoadRef.current) {
       setLoading(true);
+      setShowSlowLoadHint(false);
+      window.setTimeout(() => {
+        setShowSlowLoadHint(true);
+      }, 2000);
     }
     setError(false);
     try {
-      const response = await fetch('/api/ai/insights', {
+      const overviewResponse = await fetch('/api/dashboard/overview');
+      const overview = await overviewResponse.json();
+      if (!overviewResponse.ok) {
+        throw new Error(overview.error || 'Failed to load dashboard overview');
+      }
+
+      setData({
+        ...defaultData,
+        ...overview,
+        stats: { ...defaultStats, ...overview.stats },
+        trends: overview.trends || null,
+        productivity: { ...defaultData.productivity, ...overview.productivity },
+      });
+
+      setLoading(false);
+      isInitialLoadRef.current = false;
+
+      setAiEnhancing(true);
+      fetch('/api/ai/insights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
-      });
-      const result = await response.json();
-      setData({
-        ...defaultData,
-        ...result,
-        stats: { ...defaultStats, ...result.stats },
-        trends: result.trends || null,
-        productivity: { ...defaultData.productivity, ...result.productivity },
-      });
+      })
+        .then(async (response) => {
+          const result = await response.json();
+          if (!response.ok) return;
+
+          setData((current) => ({
+            ...current,
+            insight: result.insight || current.insight,
+            suggestions: Array.isArray(result.suggestions) && result.suggestions.length > 0
+              ? result.suggestions
+              : current.suggestions,
+            connections: Array.isArray(result.connections) && result.connections.length > 0
+              ? result.connections
+              : current.connections,
+          }));
+        })
+        .catch(() => {
+          // Overview data remains the primary dashboard surface.
+        })
+        .finally(() => {
+          setAiEnhancing(false);
+        });
     } catch (err) {
       console.error('Failed to fetch insights:', err);
       setError(true);
-    } finally {
       setLoading(false);
       isInitialLoadRef.current = false;
     }
@@ -210,7 +253,19 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
   }, [fetchInsights]);
 
   if (loading && isInitialLoadRef.current) {
-    return <DashboardContentSkeleton />;
+    return (
+      <div className="space-y-4 p-6">
+        <DashboardContentSkeleton />
+        {showSlowLoadHint && (
+          <Card className="border-amber-500/30 bg-amber-500/10">
+            <CardContent className="flex items-center gap-3 py-4 text-sm text-amber-800 dark:text-amber-200">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading the dashboard overview. AI insights are fetched after the core data is ready.
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    );
   }
 
   if (error) {
@@ -377,7 +432,7 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Sparkles className="w-5 h-5 text-amber-500" />
-                AI Insight
+                {aiEnhancing ? 'Refreshing Insight' : 'AI Insight'}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -407,6 +462,41 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
               transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
             >
               <TabsContent value="overview" className="space-y-6 mt-4">
+                {data.isFirstRun ? (
+                  <Card className="border-dashed border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 via-background to-amber-500/10">
+                    <CardContent className="space-y-6 py-10 text-center">
+                      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-indigo-500/15">
+                        <Brain className="h-8 w-8 text-indigo-500" />
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="text-2xl font-semibold">Start building your recall surface</h3>
+                        <p className="mx-auto max-w-xl text-sm text-muted-foreground">
+                          Capture Hub works best once there is something to remember. Start with one capture,
+                          install the bookmarklet, then connect a model for AI recall.
+                        </p>
+                      </div>
+                      <div className="flex flex-col justify-center gap-2 sm:flex-row">
+                        <Button className="gap-2" onClick={() => onOpenCapture?.('quick')}>
+                          <Zap className="h-4 w-4" />
+                          Quick Capture
+                        </Button>
+                        <Button variant="outline" className="gap-2" onClick={() => window.open('/api/bookmarklet', '_blank')}>
+                          <Globe className="h-4 w-4" />
+                          Install Bookmarklet
+                        </Button>
+                        <Button variant="outline" className="gap-2" onClick={() => onNavigate?.('settings')}>
+                          <Sparkles className="h-4 w-4" />
+                          Configure AI
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <AskCaptureHub onSelectItem={onSelectItem} onOpenCapture={onOpenCapture} />
+                )}
+
+                {!data.isFirstRun && (
+                <>
                 <div className="grid sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-6">
                   {/* Suggestions */}
                   {data.suggestions.length > 0 && (
@@ -573,6 +663,8 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
                     </motion.div>
                   )}
                 </div>
+                </>
+                )}
               </TabsContent>
             </motion.div>
           )}

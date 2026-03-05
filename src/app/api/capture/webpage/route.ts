@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     // Try AI capture first, fall back to basic fetch if AI not available
     let webContent;
-    if (isAIConfigured()) {
+    if (await isAIConfigured()) {
       try {
         webContent = await captureWebPage(url);
       } catch {

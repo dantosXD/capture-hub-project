@@ -20,6 +20,7 @@ export type ChatContentPart =
 
 export interface ChatCompletionOptions {
   messages: ChatMessage[];
+  model?: string;
   temperature?: number;
   maxTokens?: number;
   responseFormat?: 'text' | 'json';
@@ -130,6 +131,7 @@ export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   defaultModel?: string;
+  visionModel?: string;
   embeddingModel?: string;
   timeout?: number;
 }

@@ -39,7 +39,6 @@ export function DeviceIndicator({ initialCount = 0 }: DeviceIndicatorProps) {
   const [devices, setDevices] = useState<ConnectedDevice[]>([]);
   const [connectedCount, setConnectedCount] = useState(initialCount);
   const [prevCount, setPrevCount] = useState(initialCount);
-  const [isConnected, setIsConnected] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
@@ -57,13 +56,11 @@ export function DeviceIndicator({ initialCount = 0 }: DeviceIndicatorProps) {
       const response = await fetch('/api/devices');
       if (response.ok) {
         const data = await response.json();
-        setDevices(data.connected || []);
+        setDevices(data.devices || []);
         setConnectedCount(data.connectedCount || 0);
-        setIsConnected(true);
       }
     } catch (error) {
       console.error('Failed to fetch devices:', error);
-      setIsConnected(false);
     }
   }, []);
 
@@ -96,7 +93,6 @@ export function DeviceIndicator({ initialCount = 0 }: DeviceIndicatorProps) {
         setPrevCount(prev);
         return prev + 1;
       });
-      setIsConnected(true);
 
       // Show toast notification for device connection
       toast.success(`New device connected: ${data.deviceName}`, {

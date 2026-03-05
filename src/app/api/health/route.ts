@@ -1,25 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { isWebSocketServerRunning, getConnectedDevicesCount } from "@/lib/websocket";
-import { apiError, classifyError } from "@/lib/api-route-handler";
-import { getProviderStatus } from "@/ai/provider-registry";
-import { getEmbeddingStats } from "@/ai/embedding-pipeline";
-import { getRAGStatus } from "@/ai/rag-engine";
-import { detectDatabaseProvider } from "@/lib/db-config";
-import { isAIConfigured } from "@/lib/ai";
-import { validateRequest } from "@/lib/api-security";
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import { isWebSocketServerRunning, getConnectedDevicesCount } from '@/lib/websocket';
+import { apiError, classifyError } from '@/lib/api-route-handler';
+import { getEmbeddingStats } from '@/ai/embedding-pipeline';
+import { getRAGStatus } from '@/ai/rag-engine';
+import { getAIStatusSnapshot, resolveConnection } from '@/ai/runtime';
+import { detectDatabaseProvider } from '@/lib/db-config';
+import { isAIConfigured } from '@/lib/ai';
+import { validateRequest } from '@/lib/api-security';
 
 export async function GET(request: NextRequest) {
   const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
   if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
 
   try {
-    let dbStatus = "disconnected";
+    let dbStatus = 'disconnected';
     let tables: string[] = [];
 
     // Check database connection
     await db.$queryRaw`SELECT 1`;
-    dbStatus = "connected";
+    dbStatus = 'connected';
 
     // Get list of tables
     const result = await db.$queryRaw<Array<{ name: string }>>`
@@ -29,23 +29,38 @@ export async function GET(request: NextRequest) {
 
     // Check WebSocket server status
     const wsRunning = isWebSocketServerRunning();
-    const wsStatus = wsRunning ? "running" : "not_running";
+    const wsStatus = wsRunning ? 'running' : 'not_running';
     const connectedDevices = getConnectedDevicesCount();
 
-    const overallStatus = dbStatus === "connected" ? "healthy" : "degraded";
+    const overallStatus = dbStatus === 'connected' ? 'healthy' : 'degraded';
+
+    const [aiConfigured, aiStatus, embeddingStats, ragStatus, chatCapability, visionCapability, embeddingCapability] = await Promise.all([
+      isAIConfigured(),
+      getAIStatusSnapshot(),
+      Promise.resolve(getEmbeddingStats()),
+      Promise.resolve(getRAGStatus()),
+      resolveConnection('chat').then((connection) => connection.source !== 'mock').catch(() => false),
+      resolveConnection('vision').then((connection) => connection.source !== 'mock').catch(() => false),
+      resolveConnection('embedding').then((connection) => connection.source !== 'mock').catch(() => false),
+    ]);
 
     // In production, strip sensitive infrastructure details from response
     if (process.env.NODE_ENV === 'production') {
-      return NextResponse.json({ status: overallStatus, timestamp: new Date().toISOString() });
+      return NextResponse.json({
+        status: overallStatus,
+        timestamp: new Date().toISOString(),
+        aiConfigured,
+        ai: {
+          configured: aiConfigured,
+          capabilities: {
+            chat: chatCapability,
+            vision: visionCapability,
+            embedding: embeddingCapability,
+          },
+        },
+      });
     }
 
-    // In development, return full details
-    // AI provider status (Project Omni P4)
-    const aiProvider = getProviderStatus();
-    const embeddingStats = getEmbeddingStats();
-    const ragStatus = getRAGStatus();
-
-    // Database provider info (Project Omni P2)
     const dbProvider = detectDatabaseProvider();
 
     return NextResponse.json({
@@ -58,18 +73,28 @@ export async function GET(request: NextRequest) {
       websocket: {
         status: wsStatus,
         connectedDevices: connectedDevices,
-        path: "/ws"
+        path: '/ws',
       },
       ai: {
-        configured: isAIConfigured(),
-        provider: aiProvider.defaultProvider,
-        availableProviders: aiProvider.availableProviders,
+        configured: aiConfigured,
+        capabilities: {
+          chat: chatCapability,
+          vision: visionCapability,
+          embedding: embeddingCapability,
+        },
+        routing: {
+          defaultConnectionId: aiStatus.defaultConnectionId,
+          visionConnectionId: aiStatus.visionConnectionId,
+          embeddingConnectionId: aiStatus.embeddingConnectionId,
+          aiFallbackEnabled: aiStatus.aiFallbackEnabled,
+        },
+        connections: aiStatus.connections,
         embeddings: embeddingStats,
         rag: ragStatus,
       },
       omni: {
-        version: "1.0.0",
-        modules: ["contracts", "platform", "ai", "ux-hooks"],
+        version: '1.0.0',
+        modules: ['contracts', 'platform', 'ai', 'ux-hooks'],
       }
     });
   } catch (error) {
