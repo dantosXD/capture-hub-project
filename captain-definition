@@ -27,6 +27,7 @@
 "COPY --from=builder /app/prisma ./prisma",
 "COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client",
 "COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma",
+"COPY --from=builder /app/node_modules/next ./node_modules/next",
 "COPY --from=builder /app/server-bundle.js ./server.js",
 "EXPOSE 80",
 "RUN npm install -g prisma@6",
