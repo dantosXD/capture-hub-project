@@ -76,11 +76,22 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { action, text, selectedText, context } = body;
 
-        if (!action || !ACTION_PROMPTS[action]) {
+        const isCustom = action === 'custom';
+        if (!action || (!isCustom && !ACTION_PROMPTS[action])) {
             return NextResponse.json(
-                { error: `Invalid action. Supported: ${Object.keys(ACTION_PROMPTS).join(', ')}` },
+                { error: `Invalid action. Supported: ${Object.keys(ACTION_PROMPTS).join(', ')}, custom` },
                 { status: 400 }
             );
+        }
+
+        const { customPrompt } = body;
+        if (isCustom) {
+            if (!customPrompt?.trim()) {
+                return NextResponse.json({ error: 'customPrompt is required for custom action' }, { status: 400 });
+            }
+            if (typeof customPrompt === 'string' && customPrompt.length > 2000) {
+                return apiError('Prompt too long', 400, { details: 'Maximum 2,000 characters for custom prompt' });
+            }
         }
 
         // Length caps on AI input fields
@@ -92,6 +103,16 @@ export async function POST(request: NextRequest) {
         }
         if (context && typeof context === 'string' && context.length > MAX_AI_INPUT_CHARS) {
             return apiError('Input too long', 400, { details: 'Maximum 50,000 characters' });
+        }
+
+        // Custom action: prompt is optional context (runs prompt against selected/full text if provided)
+        if (isCustom) {
+            const inputText = selectedText || text;
+            const userContent = inputText?.trim()
+                ? `${inputText}`
+                : '';
+            const result = await getAICompletion(customPrompt.trim(), userContent || 'No text provided. Please respond to the prompt directly.');
+            return NextResponse.json({ action, result, isMock: !process.env.ZAI_API_KEY && !process.env.OPENAI_API_KEY });
         }
 
         const inputText = selectedText || text;
