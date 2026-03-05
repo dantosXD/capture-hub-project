@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { AITextarea } from '@/components/ui/ai-writing-toolbar';
 import { Badge } from '@/components/ui/badge';
 import { Plus, X, Loader2, Check, Sparkles } from 'lucide-react';
 import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
@@ -123,14 +123,14 @@ export function QuickCapture({ onComplete, onNavigateToItem }: QuickCaptureProps
         icon: <Check className="w-4 h-4" />,
       });
 
-      // Clear form on success
+      // Clear form and close modal on success
       setTitle('');
       setContent('');
       setTags([]);
       setSelectedProjectId(null);
 
-      // Don't call onComplete - keep modal open for rapid multi-capture
-      // onComplete?.();
+      // Close the modal after successful save
+      onComplete?.();
     } catch (error) {
       // Error is handled by the mutation hook
       console.error('[QuickCapture] Submit error:', error);
@@ -159,9 +159,10 @@ export function QuickCapture({ onComplete, onNavigateToItem }: QuickCaptureProps
         />
 
         {/* Content - minimal height for quick entry */}
-        <Textarea
-          placeholder="Write your thoughts here..."
+        <AITextarea
+          placeholder="Write your thoughts here... (Ctrl+Space for AI)"
           value={content}
+          onValueChange={setContent}
           onChange={(e) => setContent(e.target.value)}
           rows={5}
           className="resize-none"

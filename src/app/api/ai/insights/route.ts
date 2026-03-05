@@ -29,12 +29,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { context } = body || {};
 
-    // Get all items for analysis
-    const items = await db.captureItem.findMany({
-      where: { status: { not: 'trash' } },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
+    // Get all items for analysis - use raw SQL to avoid P2023 DateTime coercion errors
+    type RawItem = { id: string; title: string; type: string; tags: string | null; status: string; content: string | null; createdAt: string; updatedAt: string; projectId: string | null; processedAt: string | null };
+    const items = await db.$queryRawUnsafe<RawItem[]>(
+      `SELECT id, title, type, tags, status, content, createdAt, updatedAt, projectId, processedAt FROM CaptureItem WHERE status != 'trash' ORDER BY createdAt DESC LIMIT 100`
+    );
 
     const parsedItems = items.map(item => ({
       ...item,
@@ -62,7 +61,7 @@ export async function POST(request: NextRequest) {
         const date = new Date(i.createdAt);
         return date >= lastWeekStart && date < weekStart;
       }).length,
-      stale: parsedItems.filter(i => 
+      stale: parsedItems.filter(i =>
         i.status === 'inbox' && new Date(i.updatedAt) < staleDate
       ).length,
       processingRate: 0,
@@ -75,10 +74,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate week-over-week trends
-    // Get all items (including trash) to compute historical totals
-    const allItemsForTrends = await db.captureItem.findMany({
-      select: { status: true, createdAt: true, updatedAt: true },
-    });
+    // Get all items (including trash) to compute historical totals - raw SQL for safety
+    type TrendItem = { status: string; createdAt: string; updatedAt: string };
+    const allItemsForTrends = await db.$queryRawUnsafe<TrendItem[]>(
+      `SELECT status, createdAt, updatedAt FROM CaptureItem`
+    );
 
     // Items that existed by end of last week (created before weekStart)
     const itemsExistingLastWeek = allItemsForTrends.filter(
@@ -160,12 +160,12 @@ export async function POST(request: NextRequest) {
       const dateStr = date.toISOString().split('T')[0];
       const nextDate = new Date(date);
       nextDate.setDate(nextDate.getDate() + 1);
-      
+
       const count = parsedItems.filter(item => {
         const itemDate = new Date(item.createdAt);
         return itemDate >= date && itemDate < nextDate;
       }).length;
-      
+
       weeklyData.push({ date: dateStr, count });
     }
 

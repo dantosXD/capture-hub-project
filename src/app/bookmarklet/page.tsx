@@ -25,7 +25,7 @@ import { toast } from 'sonner';
 // Custom hook for client-only values - avoids hydration mismatch
 function useClientOnlyValue<T>(getClientValue: () => T, serverValue: T): T {
   return useSyncExternalStore(
-    () => () => {}, // No subscription needed
+    () => () => { }, // No subscription needed
     getClientValue,
     () => serverValue
   );
@@ -45,8 +45,33 @@ export default function BookmarkletPage() {
   // Derive API URL from server URL
   const apiUrl = serverUrl ? `${serverUrl}/api/bookmarklet` : '';
 
-  // The bookmarklet code - popup approach avoids CSP/mixed-content issues
-  const bookmarkletCode = serverUrl ? `javascript:(function(){var u=encodeURIComponent(location.href);var t=encodeURIComponent(document.title);var s='';try{s=encodeURIComponent((window.getSelection()||'').toString().trim())}catch(e){}var d='';var m=document.querySelector('meta[name="description"]');if(m)d=encodeURIComponent(m.getAttribute('content')||'');window.open('${serverUrl}/bookmarklet-widget?mode=popup&url='+u+'&title='+t+'&text='+s+'&desc='+d,'capture-hub','width=440,height=620,scrollbars=yes,resizable=yes')})();` : '';
+  // The bookmarklet code — extracts rich page metadata and opens the capture popup
+  const bookmarkletCode = serverUrl ? `javascript:(function(){
+var u=encodeURIComponent(location.href);
+var t=encodeURIComponent(document.title);
+var s='';try{s=encodeURIComponent((window.getSelection()||'').toString().trim())}catch(e){}
+var isCode=0;try{var sel=window.getSelection();if(sel.rangeCount>0){var p=sel.getRangeAt(0).commonAncestorContainer;while(p&&p.nodeType!==1)p=p.parentNode;if(p&&(p.tagName==='PRE'||p.tagName==='CODE'||p.closest('pre')||p.closest('code')))isCode=1;}}catch(e){}
+var desc='';var og='';var img='';var fav='';
+try{
+  var mDesc=document.querySelector('meta[name="description"],meta[property="og:description"]');
+  if(mDesc)desc=encodeURIComponent((mDesc.getAttribute('content')||'').slice(0,300));
+  var mOg=document.querySelector('meta[property="og:image"],meta[name="twitter:image"]');
+  if(mOg)og=encodeURIComponent(mOg.getAttribute('content')||'');
+  var mTitle=document.querySelector('meta[property="og:title"]');
+  var firstImg=document.querySelector('article img[src],main img[src],img[src]');
+  if(firstImg&&!og)img=encodeURIComponent(firstImg.src||'');
+  var favEl=document.querySelector('link[rel*="icon"]');
+  if(favEl)fav=encodeURIComponent(favEl.href||'');
+  else fav=encodeURIComponent(location.origin+'/favicon.ico');
+}catch(e){}
+var body='';try{
+  var main=document.querySelector('article,main,[role="main"]')||document.body;
+  body=encodeURIComponent((main.innerText||'').replace(/\\s+/g,' ').trim().slice(0,1800));
+}catch(e){}
+var w=520,h=700;var left=(screen.width-w)/2;var top=(screen.height-h)/2;
+window.open('${serverUrl}/bookmarklet-widget?mode=popup&url='+u+'&title='+t+'&text='+s+'&desc='+desc+'&og='+og+'&img='+img+'&fav='+fav+'&body='+body+'&isCode='+isCode,'capture-hub','width='+w+',height='+h+',left='+left+',top='+top+',scrollbars=yes,resizable=yes');
+})();` : '';
+
 
   // Set href directly on DOM element to bypass React's security check
   useEffect(() => {
@@ -57,7 +82,7 @@ export default function BookmarkletPage() {
 
   const handleCopyBookmarklet = useCallback(async () => {
     if (!bookmarkletCode) return;
-    
+
     try {
       await navigator.clipboard.writeText(bookmarkletCode);
       setCopied(true);

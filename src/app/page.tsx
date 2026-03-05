@@ -6,6 +6,7 @@ import { FloatingHub } from '@/components/FloatingHub';
 import { InboxList } from '@/components/Inbox/InboxList';
 import { Header } from '@/components/Header/Header';
 import { AIDashboard } from '@/components/Dashboard/AIDashboard';
+import { ScratchPad } from '@/components/CaptureModules/ScratchPad';
 import { CommandPalette } from '@/components/CommandPalette';
 import { ProjectsManager } from '@/components/Projects/ProjectsManager';
 import { TemplatesManager } from '@/components/Templates/TemplatesManager';
@@ -36,6 +37,7 @@ import {
   HelpCircle,
   FileText,
   Settings,
+  PenSquare,
 } from 'lucide-react';
 import { MobileBottomNav } from '@/components/MobileBottomNav/MobileBottomNav';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
@@ -450,6 +452,17 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
           </Button>
           <Button
             role="tab"
+            aria-selected={activeView === 'scratchpad'}
+            aria-controls="tabpanel"
+            variant={activeView === 'scratchpad' ? 'default' : 'outline'}
+            className="gap-2"
+            onClick={() => setActiveView('scratchpad')}
+          >
+            <PenSquare className="w-4 h-4" aria-hidden="true" />
+            Scratchpad
+          </Button>
+          <Button
+            role="tab"
             aria-selected={activeView === 'assigned'}
             aria-controls="tabpanel"
             variant={activeView === 'assigned' ? 'default' : 'outline'}
@@ -549,11 +562,11 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
           <AnimatePresence mode="wait">
             <motion.div
               key={activeView}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-              className="min-h-full"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="relative"
             >
               {activeView === 'dashboard' ? (
                 <SectionErrorWrapper sectionName="Dashboard">
@@ -580,6 +593,12 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
                 <SectionErrorWrapper sectionName="Tags">
                   <TagManager />
                 </SectionErrorWrapper>
+              ) : activeView === 'scratchpad' ? (
+                <SectionErrorWrapper sectionName="Scratchpad">
+                  <div className="p-6">
+                    <ScratchPad fullPage />
+                  </div>
+                </SectionErrorWrapper>
               ) : activeView === 'settings' ? (
                 <SectionErrorWrapper sectionName="Settings">
                   <SettingsPage />
@@ -587,7 +606,6 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
               ) : (
                 <SectionErrorWrapper sectionName={`Inbox (${activeView})`}>
                   <InboxList
-                    key={refreshKey}
                     refreshKey={refreshKey}
                     statusFilter={activeView}
                     selectedItemId={searchResultItem}

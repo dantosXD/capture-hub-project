@@ -1,0 +1,34 @@
+{
+  "type": "record",
+  "name": "CaptureItemCreated",
+  "namespace": "com.capturehub.events",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string",
+      "doc": "The unique identifier of the capture item."
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "Type of the item (e.g., link, text)."
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "doc": "Title of the item."
+    },
+    {
+      "name": "source_url",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Source URL if available."
+    },
+    {
+      "name": "created_at",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Creation timestamp."
+    }
+  ]
+}

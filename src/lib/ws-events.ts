@@ -26,6 +26,12 @@ export enum WSEventType {
   DEVICE_CONNECTED = 'device:connected',
   DEVICE_DISCONNECTED = 'device:disconnected',
 
+  // Scratchpad real-time events
+  SCRATCHPAD_CONTENT_UPDATE = 'scratchpad:content-update',
+  SCRATCHPAD_CURSOR_UPDATE = 'scratchpad:cursor-update',
+  SCRATCHPAD_JOIN = 'scratchpad:join',
+  SCRATCHPAD_LEAVE = 'scratchpad:leave',
+
   // Sync events
   SYNC_REQUEST = 'sync:request',
   SYNC_RESPONSE = 'sync:response',
@@ -164,4 +170,34 @@ export interface DeviceConnectedEvent {
 export interface DeviceDisconnectedEvent {
   socketId: string;
   disconnectedAt: string;
+}
+
+/**
+ * Scratchpad event payloads
+ */
+export interface ScratchpadContentUpdateEvent {
+  content: string;
+  cursorPosition?: number;
+  senderId: string;
+  senderName: string;
+  timestamp: string;
+}
+
+export interface ScratchpadCursorUpdateEvent {
+  senderId: string;
+  senderName: string;
+  senderColor: string;
+  cursorPosition: number;
+  selectionStart?: number;
+  selectionEnd?: number;
+}
+
+export interface ScratchpadJoinEvent {
+  senderId: string;
+  senderName: string;
+  senderColor: string;
+}
+
+export interface ScratchpadLeaveEvent {
+  senderId: string;
 }

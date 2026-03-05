@@ -337,6 +337,14 @@ async function handleMessage(ws: WebSocket, socketId: string, message: WSMessage
       await handleSyncRequest(ws, data);
       break;
 
+    // Scratchpad real-time collaboration — relay to all OTHER clients
+    case 'scratchpad:content-update':
+    case 'scratchpad:cursor-update':
+    case 'scratchpad:join':
+    case 'scratchpad:leave':
+      wss.broadcast(type, { ...data, senderId: socketId }, ws);
+      break;
+
     default:
       console.log(`[WebSocket] Unhandled message type: ${type}`);
   }

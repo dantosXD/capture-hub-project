@@ -1,0 +1,55 @@
+{
+    "project": "capture-hub",
+    "cost_centers": [
+        {
+            "name": "Legacy Infrastructure",
+            "components": [
+                {
+                    "type": "EC2",
+                    "count": 2,
+                    "monthly_cost": 150.00,
+                    "status": "active"
+                },
+                {
+                    "type": "RDS_Legacy",
+                    "count": 1,
+                    "monthly_cost": 300.00,
+                    "status": "active"
+                }
+            ],
+            "total_monthly": 450.00
+        },
+        {
+            "name": "Project Omni Infrastructure (Next-Gen)",
+            "components": [
+                {
+                    "type": "Serverless_Compute",
+                    "estimated_monthly": 45.00,
+                    "status": "provisioning"
+                },
+                {
+                    "type": "DistSQL_DB",
+                    "estimated_monthly": 180.00,
+                    "status": "provisioning"
+                },
+                {
+                    "type": "Event_Mesh",
+                    "estimated_monthly": 120.00,
+                    "status": "provisioning"
+                }
+            ],
+            "total_monthly": 345.00
+        }
+    ],
+    "savings_projection": {
+        "legacy_teardown_savings": 450.00,
+        "new_infra_cost": 345.00,
+        "net_monthly_savings": 105.00,
+        "annual_savings": 1260.00
+    },
+    "teardown_gate": {
+        "status": "pending_human_ack",
+        "legacy_traffic_percentage": 0,
+        "target_teardown_traffic": 0
+    }
+}

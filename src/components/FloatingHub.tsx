@@ -208,12 +208,12 @@ export function FloatingHub({
     return foundModule?.name || '';
   };
 
-  // Calculate radial menu positions (5 items arranged in a semi-circle above the FAB)
-  // Use smaller radius on mobile to prevent items from going off-screen
-  const radialAngleStart = -150; // Start angle (top-left)
-  const radialAngleEnd = -30;    // End angle (top-right)
+  // Calculate radial menu positions (5 items arranged in a quartile arc above and left of the FAB)
+  // Since the button is parked in the bottom right corner, we should fan out from -180 (far left) to -90 (directly above)
+  const radialAngleStart = -180; // Start angle (left)
+  const radialAngleEnd = -90;    // End angle (top)
   const radius = 100;            // Distance from FAB center (desktop)
-  const mobileRadius = 70;       // Distance from FAB center (mobile)
+  const mobileRadius = 75;       // Distance from FAB center (mobile)
 
   const getRadialPosition = (index: number, total: number, isMobile: boolean = false) => {
     const currentRadius = isMobile ? mobileRadius : radius;
@@ -279,13 +279,13 @@ export function FloatingHub({
           {!isOpen && (
             <>
               <motion.div
-                className="absolute inset-0 rounded-full bg-indigo-400/20"
+                className="absolute inset-0 rounded-full bg-indigo-400/20 pointer-events-none"
                 initial={{ scale: 1, opacity: 0.6 }}
                 animate={{ scale: 1.6, opacity: 0 }}
                 transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
               />
               <motion.div
-                className="absolute inset-0 rounded-full bg-purple-400/15"
+                className="absolute inset-0 rounded-full bg-purple-400/15 pointer-events-none"
                 initial={{ scale: 1, opacity: 0.4 }}
                 animate={{ scale: 1.8, opacity: 0 }}
                 transition={{ duration: 2, repeat: Infinity, delay: 0.5, ease: "easeOut" }}
@@ -307,7 +307,7 @@ export function FloatingHub({
               role="menu"
               aria-label="Capture modules"
               aria-orientation="horizontal"
-              className="absolute bottom-0 right-0 w-0 h-0"
+              className="absolute bottom-7 right-7 w-0 h-0"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}

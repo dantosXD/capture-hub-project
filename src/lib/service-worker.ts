@@ -38,37 +38,10 @@ export function useServiceWorker() {
 
     // Check if service workers are supported
     if ('serviceWorker' in navigator) {
-      // Register service worker
-      navigator.serviceWorker
-        .register('/sw.js')
-        .then((registration) => {
-          console.log('[SW] Service worker registered:', registration);
-
-          // Check for updates
-          registration.addEventListener('updatefound', () => {
-            const newWorker = registration.installing;
-            if (newWorker) {
-              newWorker.addEventListener('statechange', () => {
-                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  // New version available
-                  setHasUpdate(true);
-                  setWaitingServiceWorker({
-                    update: async () => {
-                      newWorker.postMessage({ type: 'SKIP_WAITING' });
-                    },
-                    uninstall: async () => {
-                      await registration.unregister();
-                      window.location.reload();
-                    },
-                  });
-                }
-              });
-            }
-          });
-        })
-        .catch((error) => {
-          console.error('[SW] Service worker registration failed:', error);
-        });
+      // FORCE DISABLE SERVICE WORKER IN DEV
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach(reg => reg.unregister());
+      });
 
       // Listen for controlling service worker changes
       navigator.serviceWorker.addEventListener('controllerchange', () => {

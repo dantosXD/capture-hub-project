@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Plus, X, Loader2, Upload, Copy, Check, ZoomIn, ZoomOut, Maximize2, Minimize2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Plus, X, Loader2, Upload, Copy, Check, ZoomIn, ZoomOut, Maximize2, Minimize2, AlertCircle, RefreshCw, Monitor, Clipboard, Camera, FileImage } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -33,6 +33,187 @@ export function OCRTool({ onComplete }: OCRToolProps) {
   const [imageZoom, setImageZoom] = useState(1);
   const [isExpanded, setIsExpanded] = useState(false);
   const [error, setError] = useState<OCRError | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Screen Capture — uses getDisplayMedia to capture a screen, window, or tab
+  const handleScreenCapture = async () => {
+    setError(null);
+    setCapturing(true);
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: 'monitor' } as any,
+        audio: false,
+      });
+
+      // Get video track and create a frame capture
+      const track = stream.getVideoTracks()[0];
+      const ImageCaptureClass = (window as any).ImageCapture;
+      const imageCapture = ImageCaptureClass ? new ImageCaptureClass(track) : null;
+
+      let blob: Blob;
+      if (imageCapture?.grabFrame) {
+        // Preferred: use ImageCapture API for high-quality still frame
+        const bitmap = await imageCapture.grabFrame();
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(bitmap, 0, 0);
+        blob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b!), 'image/png')
+        );
+      } else {
+        // Fallback: create a video element, draw one frame
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.autoplay = true;
+        await new Promise<void>((resolve) => {
+          video.onloadedmetadata = () => {
+            video.play();
+            resolve();
+          };
+        });
+        // Wait a moment for the first frame to render
+        await new Promise((r) => setTimeout(r, 200));
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(video, 0, 0);
+        blob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b!), 'image/png')
+        );
+        video.pause();
+        video.srcObject = null;
+      }
+
+      // Stop all tracks
+      stream.getTracks().forEach((t) => t.stop());
+
+      // Convert blob to base64 and set it
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setImage(e.target?.result as string);
+        setFileName('Screen Capture');
+        setFileSize(formatFileSize(blob.size));
+        setExtractedText('');
+        toast.success('Screen captured!');
+      };
+      reader.readAsDataURL(blob);
+    } catch (err: any) {
+      // User cancelled the picker — not an error
+      if (err.name !== 'AbortError' && err.name !== 'NotAllowedError') {
+        setError({
+          code: 'SCREEN_CAPTURE_FAILED',
+          message: 'Screen capture failed. Your browser may not support this feature.',
+          retryable: false,
+        });
+        toast.error('Screen capture failed');
+      }
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  // Clipboard Paste — explicitly reads clipboard for images  
+  const handleClipboardPaste = async () => {
+    setError(null);
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      for (const item of clipboardItems) {
+        const imageType = item.types.find((t) => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const base64 = e.target?.result as string;
+            setImage(base64);
+            setFileName('Clipboard Image');
+            setFileSize(formatFileSize(blob.size));
+            setExtractedText('');
+            toast.success('Image pasted from clipboard!');
+          };
+          reader.readAsDataURL(blob);
+          return;
+        }
+      }
+      toast.info('No image found in clipboard. Copy an image first, then try again.');
+    } catch (err: any) {
+      if (err.name === 'NotAllowedError') {
+        toast.info('Clipboard access denied. Try using Ctrl+V / ⌘V instead.');
+      } else {
+        toast.error('Could not read clipboard. Try using Ctrl+V / ⌘V instead.');
+      }
+    }
+  };
+
+  // Camera Capture — uses getUserMedia to take a photo from webcam
+  const handleCameraCapture = async () => {
+    setError(null);
+    setCapturing(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+
+      // Create a temporary video element to show a live preview, then capture immediately
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.autoplay = true;
+      video.playsInline = true;
+
+      await new Promise<void>((resolve) => {
+        video.onloadedmetadata = () => {
+          video.play();
+          resolve();
+        };
+      });
+
+      // Wait for a good frame
+      await new Promise((r) => setTimeout(r, 500));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(video, 0, 0);
+
+      stream.getTracks().forEach((t) => t.stop());
+      video.pause();
+      video.srcObject = null;
+
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((b) => resolve(b!), 'image/png')
+      );
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setImage(e.target?.result as string);
+        setFileName('Camera Capture');
+        setFileSize(formatFileSize(blob.size));
+        setExtractedText('');
+        toast.success('Photo captured!');
+      };
+      reader.readAsDataURL(blob);
+    } catch (err: any) {
+      if (err.name !== 'AbortError' && err.name !== 'NotAllowedError') {
+        setError({
+          code: 'CAMERA_FAILED',
+          message: 'Camera capture failed. Please check camera permissions.',
+          retryable: false,
+        });
+        toast.error('Camera capture failed');
+      } else {
+        toast.info('Camera access denied');
+      }
+    } finally {
+      setCapturing(false);
+    }
+  };
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return bytes + ' B';
@@ -119,7 +300,7 @@ export function OCRTool({ onComplete }: OCRToolProps) {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
+
     const file = e.dataTransfer.files[0];
     if (file) {
       handleFileUpload(file);
@@ -382,11 +563,10 @@ export function OCRTool({ onComplete }: OCRToolProps) {
 
       {/* Image Upload/Drop Zone */}
       <div
-        className={`border-2 border-dashed rounded-xl p-6 text-center transition-all duration-200 relative ${
-          isDragging
-            ? 'border-primary bg-primary/10 scale-[1.02] shadow-lg shadow-primary/20'
-            : 'border-border hover:border-primary/50'
-        }`}
+        className={`border-2 border-dashed rounded-xl p-6 text-center transition-all duration-200 relative ${isDragging
+          ? 'border-primary bg-primary/10 scale-[1.02] shadow-lg shadow-primary/20'
+          : 'border-border hover:border-primary/50'
+          }`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -439,7 +619,7 @@ export function OCRTool({ onComplete }: OCRToolProps) {
 
               {/* Image Container with Scroll */}
               <div className={`overflow-auto ${isExpanded ? 'flex-1 flex items-center justify-center' : 'max-h-96'} rounded-lg bg-muted/30`}
-                   style={{ maxHeight: isExpanded ? 'calc(100vh - 200px)' : '400px' }}>
+                style={{ maxHeight: isExpanded ? 'calc(100vh - 200px)' : '400px' }}>
                 <img
                   src={image}
                   alt="Uploaded"
@@ -474,30 +654,86 @@ export function OCRTool({ onComplete }: OCRToolProps) {
             </Button>
           </div>
         ) : (
-          <div className="space-y-2">
-            <Upload className={`w-10 h-10 mx-auto transition-colors ${isDragging ? 'text-primary animate-bounce' : 'text-muted-foreground'}`} />
-            <div className={`text-sm font-medium transition-colors ${isDragging ? 'text-primary text-base' : 'text-muted-foreground'}`}>
-              {isDragging ? 'Drop image here' : 'Drag & drop an image, paste from clipboard, or'}
-            </div>
-            {!isDragging && (
+          <div className="space-y-3">
+            {isDragging ? (
+              <div className="py-8">
+                <Upload className="w-12 h-12 mx-auto text-primary animate-bounce" />
+                <div className="text-base font-medium text-primary mt-2">Drop image here</div>
+              </div>
+            ) : (
               <>
-                <div className="text-xs text-muted-foreground">
-                  Supported: JPG, PNG, GIF, WebP, BMP, SVG
+                <div className="text-sm font-medium text-muted-foreground mb-3">
+                  Choose how to capture your image
                 </div>
-                <label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleFileUpload(file);
-                    }}
-                  />
-                  <Button variant="outline" size="sm" asChild>
-                    <span>Browse Files</span>
-                  </Button>
-                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Screen Capture */}
+                  <button
+                    onClick={handleScreenCapture}
+                    disabled={capturing}
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-transparent bg-muted/50 hover:bg-indigo-500/10 hover:border-indigo-500/30 transition-all duration-200 group disabled:opacity-50"
+                  >
+                    <div className="p-2.5 rounded-lg bg-indigo-500/10 group-hover:bg-indigo-500/20 transition-colors">
+                      <Monitor className="w-5 h-5 text-indigo-500" />
+                    </div>
+                    <span className="text-sm font-medium">Screen Capture</span>
+                    <span className="text-xs text-muted-foreground">Screen, window, or tab</span>
+                  </button>
+
+                  {/* Paste from Clipboard */}
+                  <button
+                    onClick={handleClipboardPaste}
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-transparent bg-muted/50 hover:bg-purple-500/10 hover:border-purple-500/30 transition-all duration-200 group"
+                  >
+                    <div className="p-2.5 rounded-lg bg-purple-500/10 group-hover:bg-purple-500/20 transition-colors">
+                      <Clipboard className="w-5 h-5 text-purple-500" />
+                    </div>
+                    <span className="text-sm font-medium">Paste Image</span>
+                    <span className="text-xs text-muted-foreground">From clipboard or Ctrl+V</span>
+                  </button>
+
+                  {/* Camera Capture */}
+                  <button
+                    onClick={handleCameraCapture}
+                    disabled={capturing}
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-transparent bg-muted/50 hover:bg-amber-500/10 hover:border-amber-500/30 transition-all duration-200 group disabled:opacity-50"
+                  >
+                    <div className="p-2.5 rounded-lg bg-amber-500/10 group-hover:bg-amber-500/20 transition-colors">
+                      <Camera className="w-5 h-5 text-amber-500" />
+                    </div>
+                    <span className="text-sm font-medium">Camera</span>
+                    <span className="text-xs text-muted-foreground">Take a photo</span>
+                  </button>
+
+                  {/* Browse Files */}
+                  <label className="cursor-pointer">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileUpload(file);
+                      }}
+                    />
+                    <div className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-transparent bg-muted/50 hover:bg-green-500/10 hover:border-green-500/30 transition-all duration-200 group">
+                      <div className="p-2.5 rounded-lg bg-green-500/10 group-hover:bg-green-500/20 transition-colors">
+                        <FileImage className="w-5 h-5 text-green-500" />
+                      </div>
+                      <span className="text-sm font-medium">Browse Files</span>
+                      <span className="text-xs text-muted-foreground">JPG, PNG, GIF, WebP</span>
+                    </div>
+                  </label>
+                </div>
+                {capturing && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Capturing...
+                  </div>
+                )}
+                <div className="text-xs text-muted-foreground text-center mt-1">
+                  You can also drag &amp; drop an image anywhere here
+                </div>
               </>
             )}
           </div>

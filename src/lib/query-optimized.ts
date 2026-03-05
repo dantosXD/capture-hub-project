@@ -70,7 +70,8 @@ export async function getRecentItems(limit = 10) {
 }
 
 /**
- * Get dashboard stats with parallel queries
+ * Get dashboard stats with parallel queries (uses raw SQL to avoid P2023
+ * DateTime coercion errors from legacy malformed date strings in SQLite).
  */
 export async function getDashboardStats() {
   const now = new Date();
@@ -82,97 +83,54 @@ export async function getDashboardStats() {
   const staleDate = new Date(todayStart);
   staleDate.setDate(staleDate.getDate() - 7);
 
-  // Run all queries in parallel
+  const todayISO = todayStart.toISOString();
+  const weekISO = weekStart.toISOString();
+  const lastWeekISO = lastWeekStart.toISOString();
+  const staleISO = staleDate.toISOString();
+
+  type CountRow = { count: number };
+  type RecentRow = { id: string; title: string; type: string; createdAt: string };
+
   const [
-    total,
-    inbox,
-    assigned,
-    archived,
-    trash,
-    processed,
-    today,
-    thisWeek,
-    lastWeek,
-    inboxThisWeek,
-    inboxLastWeek,
-    processedThisWeek,
-    processedLastWeek,
-    stale,
-    recentItems,
+    totalRows, inboxRows, assignedRows, archivedRows, trashRows, processedRows,
+    todayRows, thisWeekRows, lastWeekRows, inboxThisWeekRows, inboxLastWeekRows,
+    processedThisWeekRows, processedLastWeekRows, staleRows, recentRows,
   ] = await Promise.all([
-    db.captureItem.count(),
-    db.captureItem.count({ where: { status: 'inbox' } }),
-    db.captureItem.count({ where: { status: 'assigned' } }),
-    db.captureItem.count({ where: { status: 'archived' } }),
-    db.captureItem.count({ where: { status: 'trash' } }),
-    db.captureItem.count({ where: { processedAt: { not: null } } }),
-    db.captureItem.count({ where: { createdAt: { gte: todayStart.toISOString() } } }),
-    db.captureItem.count({ where: { createdAt: { gte: weekStart.toISOString() } } }),
-    db.captureItem.count({
-      where: {
-        createdAt: {
-          gte: lastWeekStart.toISOString(),
-          lt: weekStart.toISOString(),
-        },
-      },
-    }),
-    db.captureItem.count({
-      where: {
-        status: 'inbox',
-        createdAt: { gte: weekStart.toISOString() },
-      },
-    }),
-    db.captureItem.count({
-      where: {
-        status: 'inbox',
-        createdAt: {
-          gte: lastWeekStart.toISOString(),
-          lt: weekStart.toISOString(),
-        },
-      },
-    }),
-    db.captureItem.count({
-      where: {
-        processedAt: {
-          not: null,
-          gte: weekStart.toISOString(),
-        },
-      },
-    }),
-    db.captureItem.count({
-      where: {
-        processedAt: {
-          not: null,
-          gte: lastWeekStart.toISOString(),
-          lt: weekStart.toISOString(),
-        },
-      },
-    }),
-    db.captureItem.count({
-      where: {
-        status: 'inbox',
-        updatedAt: { lt: staleDate.toISOString() },
-      },
-    }),
-    getRecentItems(10),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE status='inbox'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE status='assigned'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE status='archived'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE status='trash'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE processedAt IS NOT NULL AND processedAt != ''`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE createdAt >= '${todayISO}'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE createdAt >= '${weekISO}'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE createdAt >= '${lastWeekISO}' AND createdAt < '${weekISO}'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE status='inbox' AND createdAt >= '${weekISO}'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE status='inbox' AND createdAt >= '${lastWeekISO}' AND createdAt < '${weekISO}'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE processedAt IS NOT NULL AND processedAt >= '${weekISO}'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE processedAt IS NOT NULL AND processedAt >= '${lastWeekISO}' AND processedAt < '${weekISO}'`),
+    db.$queryRawUnsafe<CountRow[]>(`SELECT COUNT(*) as count FROM CaptureItem WHERE status='inbox' AND updatedAt < '${staleISO}'`),
+    db.$queryRawUnsafe<RecentRow[]>(`SELECT id, title, type, createdAt FROM CaptureItem WHERE status != 'trash' ORDER BY createdAt DESC LIMIT 10`),
   ]);
 
+  const n = (rows: CountRow[]) => Number(rows[0]?.count ?? 0);
+
   return {
-    inbox,
-    assigned,
-    archived,
-    trash,
-    total,
-    today,
-    thisWeek,
-    lastWeek,
-    inboxThisWeek,
-    inboxLastWeek,
-    processedThisWeek,
-    processedLastWeek,
-    processed,
-    stale,
-    recentItems,
+    inbox: n(inboxRows),
+    assigned: n(assignedRows),
+    archived: n(archivedRows),
+    trash: n(trashRows),
+    total: n(totalRows),
+    today: n(todayRows),
+    thisWeek: n(thisWeekRows),
+    lastWeek: n(lastWeekRows),
+    inboxThisWeek: n(inboxThisWeekRows),
+    inboxLastWeek: n(inboxLastWeekRows),
+    processedThisWeek: n(processedThisWeekRows),
+    processedLastWeek: n(processedLastWeekRows),
+    processed: n(processedRows),
+    stale: n(staleRows),
+    recentItems: recentRows,
   };
 }
 

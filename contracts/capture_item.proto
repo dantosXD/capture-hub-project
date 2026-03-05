@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package capturehub.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// CaptureItem represents a single actionable item
+message CaptureItem {
+  string id = 1;
+  string type = 2; // e.g., 'link', 'text', 'image', 'task'
+  string title = 3;
+  optional string content = 4;
+  optional string extracted_text = 5;
+  optional string image_url = 6;
+  optional string source_url = 7;
+  optional string metadata = 8; // JSON string
+  string tags = 9; // Comma separated
+  string priority = 10; // 'none', 'low', 'medium', 'high'
+  string status = 11; // 'inbox', 'processed', 'archived', 'deleted'
+  optional string assigned_to = 12;
+  optional string due_date = 13;
+  optional string reminder = 14;
+  bool reminder_sent = 15;
+  bool pinned = 16;
+  optional string project_id = 17;
+  optional string processed_at = 18;
+  optional string processed_by = 19;
+  google.protobuf.Timestamp created_at = 20;
+  google.protobuf.Timestamp updated_at = 21;
+}
+
+// Service definition for modifying CaptureItems
+service CaptureItemService {
+  rpc CreateCaptureItem (CreateCaptureItemRequest) returns (CaptureItem);
+  rpc GetCaptureItem (GetCaptureItemRequest) returns (CaptureItem);
+  rpc UpdateCaptureItem (UpdateCaptureItemRequest) returns (CaptureItem);
+  rpc ListCaptureItems (ListCaptureItemsRequest) returns (ListCaptureItemsResponse);
+}
+
+message CreateCaptureItemRequest {
+  string type = 1;
+  string title = 2;
+  optional string content = 3;
+  optional string source_url = 4;
+  // Omitted other fields for brevity in POC
+}
+
+message GetCaptureItemRequest {
+  string id = 1;
+}
+
+message UpdateCaptureItemRequest {
+  string id = 1;
+  optional string title = 2;
+  optional string status = 3;
+  // Omitted other fields
+}
+
+message ListCaptureItemsRequest {
+  optional string status = 1;
+  optional string project_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListCaptureItemsResponse {
+  repeated CaptureItem items = 1;
+  string next_page_token = 2;
+}

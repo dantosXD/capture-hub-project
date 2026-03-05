@@ -1,6 +1,7 @@
 import ZAI from 'z-ai-web-dev-sdk';
 import { loggers } from './logger';
 import { retryWithBackoff, withGracefulDegradation, circuitBreakers } from './error-recovery';
+import { extractRichContent } from './scraper';
 
 const logger = loggers.ai;
 
@@ -382,25 +383,15 @@ export async function fetchWebPageBasic(url: string): Promise<{
 
     const html = await response.text();
 
-    // Basic HTML parsing to extract title and meta description
-    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i);
+    const scraped = extractRichContent(html, url);
     const faviconMatch = html.match(/<link[^>]*rel=["']icon["'][^>]*href=["']([^"']*)["'][^>]*>/i);
 
-    // Extract text content (remove script/style tags, then get text)
-    const textContent = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .substring(0, 5000); // Limit content length
-
     const result = {
-      title: titleMatch ? titleMatch[1].trim() : new URL(url).hostname,
-      description: descMatch ? descMatch[1].trim() : '',
-      content: textContent,
+      title: scraped?.title || new URL(url).hostname,
+      description: scraped?.excerpt || '',
+      content: scraped?.markdown || html.substring(0, 5000), // Fallback
       favicon: faviconMatch ? faviconMatch[1] : undefined,
+      metadata: scraped?.metadata || {},
     };
 
     logger.info('Basic web page fetch completed', {

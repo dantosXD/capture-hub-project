@@ -1,0 +1,17 @@
+
+
+Usage: caprover [options] [command]
+
+CLI tool for CapRover. See CapRover.com for more details.
+
+Options:
+  -V, --version                output the version number
+  -h, --help                   output usage information
+
+Commands:
+  serversetup|setup [options]  Performs necessary actions to prepare CapRover on your server.
+  login [options]              Login to a CapRover machine. You can be logged in to multiple machines simultaneously.
+  list|ls                      List all CapRover machines currently logged in.
+  logout [options]             Logout from a CapRover machine and clear auth info.
+  deploy [options]             Deploy your app to a specific CapRover machine. You'll be prompted for missing parameters.
+  api [options]                Call a generic API on a specific CapRover machine. Use carefully only if you really know what you are doing!

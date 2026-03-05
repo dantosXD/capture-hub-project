@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fadeInUp, staggerContainer, staggerItem } from '@/lib/animations';
 import {
@@ -154,6 +154,7 @@ function persistTab(tab: string): void {
 export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashboardProps) {
   const [data, setData] = useState<DashboardData>(defaultData);
   const [loading, setLoading] = useState(true);
+  const isInitialLoadRef = useRef(true);
   const [error, setError] = useState(false);
   const [activeTab, setActiveTab] = useState(getPersistedTab);
   const { on: onWsEvent } = useWebSocket();
@@ -165,7 +166,10 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
   }, []);
 
   const fetchInsights = useCallback(async () => {
-    setLoading(true);
+    // Only show full skeleton on initial load, not on re-fetches
+    if (isInitialLoadRef.current) {
+      setLoading(true);
+    }
     setError(false);
     try {
       const response = await fetch('/api/ai/insights', {
@@ -186,6 +190,7 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
       setError(true);
     } finally {
       setLoading(false);
+      isInitialLoadRef.current = false;
     }
   }, []);
 
@@ -204,7 +209,7 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
     fetchInsights();
   }, [fetchInsights]);
 
-  if (loading) {
+  if (loading && isInitialLoadRef.current) {
     return <DashboardContentSkeleton />;
   }
 
@@ -402,172 +407,172 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
               transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
             >
               <TabsContent value="overview" className="space-y-6 mt-4">
-          <div className="grid sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-6">
-            {/* Suggestions */}
-            {data.suggestions.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 }}
-              >
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-lg">
-                      <Lightbulb className="w-5 h-5 text-amber-500" />
-                      Suggestions
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {data.suggestions.map((suggestion, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 cursor-pointer group"
-                        onClick={() => {
-                          if (suggestion.action === 'navigate') {
-                            onNavigate?.(suggestion.target || 'inbox');
-                          } else if (suggestion.action === 'openCapture') {
-                            onOpenCapture?.(suggestion.target || 'note');
-                          } else if (suggestion.action === 'filter') {
-                            // Navigate to inbox with specific filter
-                            onNavigate?.(suggestion.target || 'inbox');
-                          }
-                        }}
-                      >
-                        <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
-                        <span className="text-sm">{suggestion.text}</span>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-
-            {/* Stale Items Warning */}
-            {data.stats.stale > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.6 }}
-              >
-                <Card className="border-amber-500/20">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-lg text-amber-500">
-                      <AlertTriangle className="w-5 h-5" />
-                      Stale Items
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground mb-3">
-                      {data.stats.stale} items haven't been processed in over 7 days
-                    </p>
-                    {data.staleItems.slice(0, 3).map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-muted/50 rounded px-2 -mx-2"
-                        onClick={() => onSelectItem?.(item.id)}
-                      >
-                        <span className="truncate text-sm">{item.title}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {safeFormatRelative(item.createdAt)}
-                        </span>
-                      </div>
-                    ))}
-                    {data.stats.stale > 3 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full mt-2"
-                        onClick={() => onNavigate?.('inbox')}
-                      >
-                        View all stale items
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-          </div>
-
-          {/* Recent Activity */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7 }}
-          >
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Clock className="w-5 h-5 text-blue-500" />
-                  Recent Captures
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {data.recentItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-muted/50 rounded px-2 -mx-2"
-                      onClick={() => onSelectItem?.(item.id)}
+                <div className="grid sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-6">
+                  {/* Suggestions */}
+                  {data.suggestions.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.5 }}
                     >
-                      <div className="flex items-center gap-3">
-                        <Badge variant="outline" className="capitalize">{item.type}</Badge>
-                        <span className="truncate">{item.title}</span>
-                      </div>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {safeFormatRelative(item.createdAt)}
-                      </span>
-                    </div>
-                  ))}
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="flex items-center gap-2 text-lg">
+                            <Lightbulb className="w-5 h-5 text-amber-500" />
+                            Suggestions
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          {data.suggestions.map((suggestion, index) => (
+                            <div
+                              key={index}
+                              className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 cursor-pointer group"
+                              onClick={() => {
+                                if (suggestion.action === 'navigate') {
+                                  onNavigate?.(suggestion.target || 'inbox');
+                                } else if (suggestion.action === 'openCapture') {
+                                  onOpenCapture?.(suggestion.target || 'note');
+                                } else if (suggestion.action === 'filter') {
+                                  // Navigate to inbox with specific filter
+                                  onNavigate?.(suggestion.target || 'inbox');
+                                }
+                              }}
+                            >
+                              <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+                              <span className="text-sm">{suggestion.text}</span>
+                            </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  )}
+
+                  {/* Stale Items Warning */}
+                  {data.stats.stale > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.6 }}
+                    >
+                      <Card className="border-amber-500/20">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="flex items-center gap-2 text-lg text-amber-500">
+                            <AlertTriangle className="w-5 h-5" />
+                            Stale Items
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-sm text-muted-foreground mb-3">
+                            {data.stats.stale} items haven't been processed in over 7 days
+                          </p>
+                          {data.staleItems.slice(0, 3).map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-muted/50 rounded px-2 -mx-2"
+                              onClick={() => onSelectItem?.(item.id)}
+                            >
+                              <span className="truncate text-sm">{item.title}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {safeFormatRelative(item.createdAt)}
+                              </span>
+                            </div>
+                          ))}
+                          {data.stats.stale > 3 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="w-full mt-2"
+                              onClick={() => onNavigate?.('inbox')}
+                            >
+                              View all stale items
+                            </Button>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  )}
                 </div>
-              </CardContent>
-            </Card>
-          </motion.div>
 
-          {/* Top Tags & Connections */}
-          <div className="grid sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-6">
-            {/* Top Tags */}
-            {data.topTags.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.8 }}
-              >
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">Top Tags</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-wrap gap-2">
-                      {data.topTags.map(({ tag, count }) => (
-                        <Badge
-                          key={tag}
-                          variant="secondary"
-                          className="text-sm cursor-pointer hover:bg-primary/20 transition-colors"
-                          onClick={() => onNavigate?.('inbox', { tag })}
-                        >
-                          #{tag} <span className="ml-1 opacity-50">{count}</span>
-                        </Badge>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
+                {/* Recent Activity */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.7 }}
+                >
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <Clock className="w-5 h-5 text-blue-500" />
+                        Recent Captures
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        {data.recentItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-muted/50 rounded px-2 -mx-2"
+                            onClick={() => onSelectItem?.(item.id)}
+                          >
+                            <div className="flex items-center gap-3">
+                              <Badge variant="outline" className="capitalize">{item.type}</Badge>
+                              <span className="truncate">{item.title}</span>
+                            </div>
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              {safeFormatRelative(item.createdAt)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
 
-            {/* AI-Discovered Connections */}
-            {data.connections.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.9 }}
-              >
-                <ItemConnections
-                  connections={data.connections}
-                  onSelectItem={onSelectItem}
-                />
-              </motion.div>
-            )}
-          </div>
+                {/* Top Tags & Connections */}
+                <div className="grid sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-6">
+                  {/* Top Tags */}
+                  {data.topTags.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.8 }}
+                    >
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-lg">Top Tags</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex flex-wrap gap-2">
+                            {data.topTags.map(({ tag, count }) => (
+                              <Badge
+                                key={tag}
+                                variant="secondary"
+                                className="text-sm cursor-pointer hover:bg-primary/20 transition-colors"
+                                onClick={() => onNavigate?.('inbox', { tag })}
+                              >
+                                #{tag} <span className="ml-1 opacity-50">{count}</span>
+                              </Badge>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  )}
+
+                  {/* AI-Discovered Connections */}
+                  {data.connections.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.9 }}
+                    >
+                      <ItemConnections
+                        connections={data.connections}
+                        onSelectItem={onSelectItem}
+                      />
+                    </motion.div>
+                  )}
+                </div>
               </TabsContent>
             </motion.div>
           )}
@@ -581,11 +586,11 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
               transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
             >
               <TabsContent value="workflow" className="mt-4">
-          <ProcessingWorkflow
-            staleItems={data.staleItems}
-            onSelectItem={onSelectItem}
-            onNavigate={onNavigate}
-          />
+                <ProcessingWorkflow
+                  staleItems={data.staleItems}
+                  onSelectItem={onSelectItem}
+                  onNavigate={onNavigate}
+                />
               </TabsContent>
             </motion.div>
           )}
@@ -599,10 +604,10 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
               transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
             >
               <TabsContent value="kanban" className="mt-4 h-[calc(100vh-280px)]">
-          <GTDWorkflow
-            onSelectItem={onSelectItem}
-            onNavigate={onNavigate}
-          />
+                <GTDWorkflow
+                  onSelectItem={onSelectItem}
+                  onNavigate={onNavigate}
+                />
               </TabsContent>
             </motion.div>
           )}
@@ -616,12 +621,12 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
               transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
             >
               <TabsContent value="analytics" className="mt-4">
-          <AnalyticsTab
-            weeklyData={data.weeklyData || []}
-            topTags={data.topTags}
-            stats={data.stats}
-            productivity={data.productivity}
-          />
+                <AnalyticsTab
+                  weeklyData={data.weeklyData || []}
+                  topTags={data.topTags}
+                  stats={data.stats}
+                  productivity={data.productivity}
+                />
               </TabsContent>
             </motion.div>
           )}
@@ -635,107 +640,106 @@ export function AIDashboard({ onNavigate, onSelectItem, onOpenCapture }: AIDashb
               transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
             >
               <TabsContent value="projects" className="mt-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <FolderOpen className="w-5 h-5 text-indigo-500" />
-                    Projects
-                  </CardTitle>
-                  <CardDescription>
-                    Organize your captures into projects
-                  </CardDescription>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => onNavigate?.('projects')}>
-                  <Plus className="w-4 h-4 mr-1" />
-                  New Project
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {data.projects && data.projects.length > 0 ? (
-                <>
-                  {/* Project Statistics - stack on mobile, 4 columns on larger screens */}
-                  <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                    {(() => {
-                      const statusCounts = data.projects.reduce((acc, p) => {
-                        acc[p.status] = (acc[p.status] || 0) + 1;
-                        return acc;
-                      }, {} as Record<string, number>);
-
-                      const stats = [
-                        { label: 'Total', value: data.projects.length, color: 'bg-slate-500' },
-                        { label: 'Active', value: statusCounts.active || 0, color: 'bg-indigo-500' },
-                        { label: 'On Hold', value: statusCounts['on-hold'] || 0, color: 'bg-amber-500' },
-                        { label: 'Completed', value: statusCounts.completed || 0, color: 'bg-purple-500' },
-                      ];
-
-                      return stats.map((stat) => (
-                        <div key={stat.label} className="text-center">
-                          <div className={`text-2xl font-bold`}>
-                            <AnimatedNumber value={stat.value} />
-                          </div>
-                          <div className="text-xs text-muted-foreground">{stat.label}</div>
-                        </div>
-                      ));
-                    })()}
-                  </div>
-
-                  {/* Project Grid */}
-                  <div className="grid sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {data.projects.map((project) => (
-                      <div
-                        key={project.id}
-                        className="p-4 rounded-lg border hover:shadow-md transition-shadow cursor-pointer"
-                        onClick={() => onNavigate?.('projects')}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div
-                            className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 border"
-                            style={{ backgroundColor: `${project.color}20`, borderColor: `${project.color}40` }}
-                          >
-                            <div
-                              className="w-4 h-4 rounded-full"
-                              style={{ backgroundColor: project.color }}
-                            />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium truncate">{project.name}</p>
-                            <p className="text-sm text-muted-foreground">{project.itemCount} items</p>
-                            <Badge
-                              variant="outline"
-                              className={`mt-2 text-xs capitalize ${
-                                project.status === 'active'
-                                  ? 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300 border-indigo-500/20'
-                                  : project.status === 'on-hold'
-                                  ? 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300 border-amber-500/20'
-                                  : project.status === 'completed'
-                                  ? 'bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300 border-purple-500/20'
-                                  : 'bg-slate-500/10 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300 border-slate-500/20'
-                              }`}
-                            >
-                              {project.status === 'on-hold' ? 'On Hold' : project.status}
-                            </Badge>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-1" />
-                        </div>
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <FolderOpen className="w-5 h-5 text-indigo-500" />
+                          Projects
+                        </CardTitle>
+                        <CardDescription>
+                          Organize your captures into projects
+                        </CardDescription>
                       </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>No projects yet</p>
-                  <Button variant="outline" size="sm" className="mt-3" onClick={() => onNavigate?.('projects')}>
-                    <Plus className="w-4 h-4 mr-1" />
-                    Create Project
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                      <Button variant="outline" size="sm" onClick={() => onNavigate?.('projects')}>
+                        <Plus className="w-4 h-4 mr-1" />
+                        New Project
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {data.projects && data.projects.length > 0 ? (
+                      <>
+                        {/* Project Statistics - stack on mobile, 4 columns on larger screens */}
+                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                          {(() => {
+                            const statusCounts = data.projects.reduce((acc, p) => {
+                              acc[p.status] = (acc[p.status] || 0) + 1;
+                              return acc;
+                            }, {} as Record<string, number>);
+
+                            const stats = [
+                              { label: 'Total', value: data.projects.length, color: 'bg-slate-500' },
+                              { label: 'Active', value: statusCounts.active || 0, color: 'bg-indigo-500' },
+                              { label: 'On Hold', value: statusCounts['on-hold'] || 0, color: 'bg-amber-500' },
+                              { label: 'Completed', value: statusCounts.completed || 0, color: 'bg-purple-500' },
+                            ];
+
+                            return stats.map((stat) => (
+                              <div key={stat.label} className="text-center">
+                                <div className={`text-2xl font-bold`}>
+                                  <AnimatedNumber value={stat.value} />
+                                </div>
+                                <div className="text-xs text-muted-foreground">{stat.label}</div>
+                              </div>
+                            ));
+                          })()}
+                        </div>
+
+                        {/* Project Grid */}
+                        <div className="grid sm:grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                          {data.projects.map((project) => (
+                            <div
+                              key={project.id}
+                              className="p-4 rounded-lg border hover:shadow-md transition-shadow cursor-pointer"
+                              onClick={() => onNavigate?.('projects')}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div
+                                  className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 border"
+                                  style={{ backgroundColor: `${project.color}20`, borderColor: `${project.color}40` }}
+                                >
+                                  <div
+                                    className="w-4 h-4 rounded-full"
+                                    style={{ backgroundColor: project.color }}
+                                  />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium truncate">{project.name}</p>
+                                  <p className="text-sm text-muted-foreground">{project.itemCount} items</p>
+                                  <Badge
+                                    variant="outline"
+                                    className={`mt-2 text-xs capitalize ${project.status === 'active'
+                                        ? 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300 border-indigo-500/20'
+                                        : project.status === 'on-hold'
+                                          ? 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300 border-amber-500/20'
+                                          : project.status === 'completed'
+                                            ? 'bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300 border-purple-500/20'
+                                            : 'bg-slate-500/10 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300 border-slate-500/20'
+                                      }`}
+                                  >
+                                    {project.status === 'on-hold' ? 'On Hold' : project.status}
+                                  </Badge>
+                                </div>
+                                <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-1" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                        <p>No projects yet</p>
+                        <Button variant="outline" size="sm" className="mt-3" onClick={() => onNavigate?.('projects')}>
+                          <Plus className="w-4 h-4 mr-1" />
+                          Create Project
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </TabsContent>
             </motion.div>
           )}

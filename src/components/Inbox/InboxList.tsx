@@ -116,6 +116,7 @@ export function InboxList({
 }: InboxListProps) {
   const [items, setItems] = useState<CaptureItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const isInitialLoadRef = useRef(true);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [previewItem, setPreviewItem] = useState<CaptureItem | null>(null);
 
@@ -150,12 +151,16 @@ export function InboxList({
   // Track countdown intervals for cleanup
   const countdownIntervalsRef = useRef<NodeJS.Timeout[]>([]);
 
-  // Update status filter when prop changes
+  // Update status filter when prop changes — reset all filters and expand list panel
   useEffect(() => {
     if (initialStatusFilter) {
       setStatusFilter(initialStatusFilter);
-      setAssignedToFilter('all'); // Reset category filter when status changes
+      setTypeFilter('all');
+      setPriorityFilter('all');
+      setAssignedToFilter('all');
+      setTagFilter('');
       setPage(0);
+      setListPanelCollapsed(false); // Always show list when switching tabs
     }
   }, [initialStatusFilter]);
 
@@ -191,7 +196,10 @@ export function InboxList({
   }, []);
 
   const fetchItems = useCallback(async () => {
-    setLoading(true);
+    // Only show skeleton loading state on the very first load
+    if (isInitialLoadRef.current) {
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams();
       if (typeFilter !== 'all') params.set('type', typeFilter);
@@ -233,6 +241,7 @@ export function InboxList({
       });
     } finally {
       setLoading(false);
+      isInitialLoadRef.current = false;
     }
   }, [typeFilter, priorityFilter, statusFilter, assignedToFilter, tagFilter, sortBy, page]);
 
@@ -993,8 +1002,8 @@ export function InboxList({
                   {selectedItems.length === items.length
                     ? `All ${items.length} items selected`
                     : selectedItems.length > 0
-                    ? `${selectedItems.length} of ${items.length} selected`
-                    : `${items.length} items`}
+                      ? `${selectedItems.length} of ${items.length} selected`
+                      : `${items.length} items`}
                 </span>
               </div>
             )}
@@ -1006,40 +1015,40 @@ export function InboxList({
               initial="hidden"
               animate="visible"
             >
-            <AnimatePresence mode="popLayout">
-              {items.map((item, index) => (
-                <motion.div
-                  key={item.id}
-                  variants={listItem}
-                  initial="hidden"
-                  animate="visible"
-                  exit="exit"
-                  transition={{ duration: 0.25, delay: Math.min(index * 0.03, 0.15) }}
-                  layout
-                >
-                  <InboxItem
-                    item={item}
-                    selected={selectedItems.includes(item.id)}
-                    isActive={previewItem?.id === item.id}
-                    onSelect={(checked) => handleSelectItem(item.id, checked)}
-                    onClick={() => {
-                      setPreviewItem(item);
-                      onPreviewItem?.(item);
-                    }}
-                    onDelete={() =>
-                      statusFilter === 'trash'
-                        ? handlePermanentDelete(item.id)
-                        : handleDeleteItem(item.id)
-                    }
-                    onPin={statusFilter !== 'trash' ? () => handleTogglePin(item.id) : undefined}
-                    onRestore={statusFilter === 'trash' ? () => handleRestoreItem(item.id) : undefined}
-                    typeIcon={typeIcons[item.type]}
-                    typeColor={typeColors[item.type]}
-                  />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </motion.div>
+              <AnimatePresence mode="popLayout">
+                {items.map((item, index) => (
+                  <motion.div
+                    key={item.id}
+                    variants={listItem}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    transition={{ duration: 0.25, delay: Math.min(index * 0.03, 0.15) }}
+                    layout
+                  >
+                    <InboxItem
+                      item={item}
+                      selected={selectedItems.includes(item.id)}
+                      isActive={previewItem?.id === item.id}
+                      onSelect={(checked) => handleSelectItem(item.id, checked)}
+                      onClick={() => {
+                        setPreviewItem(item);
+                        onPreviewItem?.(item);
+                      }}
+                      onDelete={() =>
+                        statusFilter === 'trash'
+                          ? handlePermanentDelete(item.id)
+                          : handleDeleteItem(item.id)
+                      }
+                      onPin={statusFilter !== 'trash' ? () => handleTogglePin(item.id) : undefined}
+                      onRestore={statusFilter === 'trash' ? () => handleRestoreItem(item.id) : undefined}
+                      typeIcon={typeIcons[item.type]}
+                      typeColor={typeColors[item.type]}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
           </>
         )}
       </div>
@@ -1100,6 +1109,7 @@ export function InboxList({
         </Button>
       </div>
       <ItemPreview
+        key={previewItem.id}
         item={previewItem}
         onClose={() => {
           setPreviewItem(null);
@@ -1178,6 +1188,7 @@ export function InboxList({
         {previewItem && (
           <div className="fixed inset-0 z-50 bg-background">
             <ItemPreview
+              key={previewItem.id}
               item={previewItem}
               onClose={() => {
                 setPreviewItem(null);

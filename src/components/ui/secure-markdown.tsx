@@ -11,6 +11,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { CopyButton } from '@/components/ui/copy-button';
 
 interface SecureMarkdownProps {
   children: string;
@@ -55,27 +56,33 @@ export function SecureMarkdown({ children, className = '', maxLength = 50000 }: 
   return (
     <div className={`prose dark:prose-invert prose-sm max-w-none break-words ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, [rehypeSanitize, customSchema]]}
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeSanitize, customSchema]]}
         components={{
           // Custom code block rendering with syntax highlighting
           code(props: any) {
             const { inline, className, children } = props;
             const match = /language-(\w+)/.exec(className || '');
             const language = match ? match[1] : '';
+            const codeString = String(children).replace(/\n$/, '');
 
             return !inline && language ? (
-              <SyntaxHighlighter
-                style={oneDark}
-                language={language}
-                PreTag="div"
-                className="rounded-md"
-                customStyle={{
-                  margin: 0,
-                  borderRadius: '0.375rem',
-                }}
-              >
-                {String(children).replace(/\n$/, '')}
-              </SyntaxHighlighter>
+              <div className="relative group/code block mb-4 mt-2">
+                <div className="absolute right-2 top-2 z-10 bg-zinc-800/80 backdrop-blur-sm rounded-md opacity-0 group-hover/code:opacity-100 transition-opacity">
+                  <CopyButton content={codeString} variant="ghost" className="h-8 w-8 text-zinc-400 hover:text-white" />
+                </div>
+                <SyntaxHighlighter
+                  style={oneDark}
+                  language={language}
+                  PreTag="div"
+                  className="rounded-md !m-0"
+                  customStyle={{
+                    borderRadius: '0.5rem',
+                  }}
+                >
+                  {codeString}
+                </SyntaxHighlighter>
+              </div>
             ) : (
               <code className={className}>
                 {children}

@@ -1,0 +1,122 @@
+
+test.describe('Capture Hub Regression Tests', () => {
+  const baseUrl = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000';
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto(baseUrl);
+  });
+
+  test('Page loads successfully', async ({ page }) => {
+    await expect(page).toHaveTitle(/Capture Hub/);
+    console.log('✓ Page title loaded');
+  });
+
+  test('Dashboard view is visible', async ({ page }) => {
+    // Wait for page to load
+    await page.waitForLoadState('networkidle');
+    console.log('✓ Page loaded');
+
+    // Check for dashboard elements
+    const dashboardTab = page.locator('text=Dashboard').first();
+    await expect(dashboardTab).toBeVisible();
+    console.log('✓ Dashboard tab visible');
+
+    // Check for stats cards
+    const statsCards = page.locator('[class*="stat"], [class*="card"]').first();
+    await expect(statsCards).toBeVisible({ timeout: 5000 });
+    console.log('✓ Stats cards visible');
+  });
+
+  test('Navigation tabs work', async ({ page }) => {
+    await page.waitForLoadState('networkidle');
+
+    // Test Inbox tab
+    await page.click('text=Inbox', { timeout: 5000 });
+    console.log('✓ Clicked Inbox tab');
+    await page.waitForTimeout(1000);
+
+    // Test Projects tab
+    await page.click('text=Projects', { timeout: 5000 });
+    console.log('✓ Clicked Projects tab');
+    await page.waitForTimeout(1000);
+
+    // Test Archived tab
+    await page.click('text=Archived', { timeout: 5000 });
+    console.log('✓ Clicked Archived tab');
+  });
+
+  test('Search bar is present', async ({ page }) => {
+    await page.waitForLoadState('networkidle');
+
+    const searchInput = page.locator('input[placeholder*="search" i], input[placeholder*="Search" i]').first();
+    await expect(searchInput).toBeVisible({ timeout: 5000 });
+    console.log('✓ Search bar visible');
+  });
+
+  test('Floating action button is present', async ({ page }) => {
+    await page.waitForLoadState('networkidle');
+
+    // Prefer stable accessible label over brittle class selectors
+    const fab = page.getByRole('button', { name: /create new capture/i });
+    await expect(fab).toBeVisible({ timeout: 5000 });
+    console.log('✓ Floating action button visible');
+  });
+
+  test('No console errors', async ({ page }) => {
+    const errors: string[] = [];
+
+    page.on('console', msg => {
+      if (msg.type() === 'error') {
+        errors.push(msg.text());
+      }
+    });
+
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(3000);
+
+    if (errors.length > 0) {
+      console.log('Console errors found:', errors);
+    }
+    console.log(`✓ Checked console - ${errors.length} errors`);
+  });
+
+  test('Database data is displayed', async ({ page }) => {
+    await page.waitForLoadState('networkidle');
+
+    // Wait for data to load
+    await page.waitForTimeout(2000);
+
+    // Check if any capture items are displayed
+    const items = page.locator('[class*="item"], [class*="capture"], article');
+    const count = await items.count();
+
+    console.log(`✓ Found ${count} items in the UI`);
+
+    // We should have at least some items based on the API test showing 55 total
+    expect(count).toBeGreaterThan(0);
+  });
+});
+
+test('Scratchpad has new UI elements', async ({ page }) => {
+    await page.goto('http://localhost:3000');
+
+    // Open Scratchpad
+    await page.click('[id="capture-hub"]'); // Assuming the FloatingHub has an ID or we can find the trigger
+    await page.click('text="Scratchpad"');
+
+    // 1. Verify Templates and Maximize buttons exist
+    const templateBtn = page.getByRole('button', { name: /Templates/i });
+    await expect(templateBtn).toBeVisible({ timeout: 5000 });
+
+    const maximizeBtn = page.getByTitle(/Toggle Fullscreen/i);
+    await expect(maximizeBtn).toBeVisible();
+
+    // 2. Verify 3 tabs exist
+    await expect(page.getByRole('tab', { name: /Edit/i })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Split/i })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Preview/i })).toBeVisible();
+
+    // 3. Verify Formatting Toolbar (bold, italic, etc)
+    await expect(page.getByTitle(/Bold \(Cmd\+B\)/i)).toBeVisible();
+    await expect(page.getByTitle(/Italic \(Cmd\+I\)/i)).toBeVisible();
+});

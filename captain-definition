@@ -1,4 +1,33 @@
 {
-  "schemaVersion": 2,
-  "dockerfilePath": "./Dockerfile"
+"schemaVersion": 2,
+"dockerfileLines": [
+"FROM node:20-alpine AS base",
+"WORKDIR /app",
+"",
+"FROM base AS builder",
+"RUN apk add --no-cache openssl",
+"COPY package.json package-lock.json ./",
+"RUN npm ci",
+"COPY . .",
+"ENV DATABASE_URL=\"file:./dev.db\"",
+"RUN npx prisma generate",
+"RUN npm run build",
+"",
+"FROM base AS runner",
+"RUN apk add --no-cache openssl",
+"ENV NODE_ENV=production",
+"ENV NEXT_TELEMETRY_DISABLED=1",
+"ENV HOSTNAME=\"0.0.0.0\"",
+"ENV PORT=\"80\"",
+"ENV DATABASE_URL=\"file:/app/data/dev.db\"",
+"COPY --from=builder /app/public ./public",
+"COPY --from=builder /app/.next/standalone ./",
+"COPY --from=builder /app/.next/static ./.next/static",
+"COPY --from=builder /app/prisma ./prisma",
+"COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client",
+"COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma",
+"EXPOSE 80",
+"RUN npm install -g prisma@6",
+"CMD mkdir -p /app/data && touch /app/data/dev.db && npx prisma db push --accept-data-loss && node server.js"
+]
 }

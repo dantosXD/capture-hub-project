@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
+import { AITextarea } from '@/components/ui/ai-writing-toolbar';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -41,6 +41,10 @@ import {
   ZoomIn,
   X as XIcon,
   Archive,
+  ShoppingCart,
+  ChefHat,
+  Star,
+  Code2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { safeFormatRelative, safeFormatAbsolute, safeParseDate, safeIsPast, safeIsToday, safeIsTomorrow } from '@/lib/safe-date';
@@ -53,6 +57,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { LinkCreator } from '@/components/Knowledge/LinkCreator';
 import { SummaryCard } from '@/components/Inbox/SummaryCard';
+import { CopyButton } from '@/components/ui/copy-button';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { WSEventType } from '@/lib/ws-events';
 
@@ -356,6 +361,122 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
   };
 
   const renderContent = () => {
+    console.log('[renderContent] item.type:', item.type, 'tags:', item.tags, 'content starts with ```:', item.content?.startsWith('```'), 'content length:', item.content?.length);
+    // Parse metadata for structured data cards
+    const meta = item.metadata ? (typeof item.metadata === 'string' ? (() => { try { return JSON.parse(item.metadata); } catch { return {}; } })() : item.metadata) : {};
+
+    // --- Product Card ---
+    if (meta.structuredType === 'Product' && meta.product) {
+      const p = meta.product;
+      return (
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl border bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border-emerald-500/20">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                <ShoppingCart className="w-5 h-5 text-emerald-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1">Product</p>
+                <h4 className="font-semibold text-sm">{p.name || item.title}</h4>
+                {p.brand && <p className="text-xs text-muted-foreground mt-0.5">{p.brand}</p>}
+              </div>
+            </div>
+            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-emerald-500/10">
+              {p.offers?.price && (
+                <div>
+                  <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                    {p.offers.currency === 'USD' ? '$' : p.offers.currency || '$'}{p.offers.price}
+                  </p>
+                </div>
+              )}
+              {p.rating && (
+                <div className="flex items-center gap-1">
+                  <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+                  <span className="text-sm font-medium">{p.rating.value}</span>
+                  {p.rating.count && <span className="text-xs text-muted-foreground">({p.rating.count} reviews)</span>}
+                </div>
+              )}
+            </div>
+            {p.description && <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{p.description}</p>}
+          </div>
+          {item.sourceUrl && (
+            <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-2 text-primary hover:underline text-sm">
+              <ExternalLink className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">{item.sourceUrl}</span>
+            </a>
+          )}
+          <SecureMarkdown className="max-w-none break-words">
+            {(item.content || '').substring(0, 2000)}
+          </SecureMarkdown>
+        </div>
+      );
+    }
+
+    // --- Recipe Card ---
+    if (meta.structuredType === 'Recipe' && meta.recipe) {
+      const r = meta.recipe;
+      return (
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl border bg-gradient-to-br from-orange-500/10 to-amber-500/5 border-orange-500/20">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                <ChefHat className="w-5 h-5 text-orange-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-orange-600 dark:text-orange-400 uppercase tracking-wider mb-1">Recipe</p>
+                <h4 className="font-semibold text-sm">{r.name || item.title}</h4>
+                {r.author && <p className="text-xs text-muted-foreground mt-0.5">by {r.author}</p>}
+              </div>
+            </div>
+            {(r.prepTime || r.cookTime || r.recipeYield) && (
+              <div className="flex gap-4 mt-3 pt-3 border-t border-orange-500/10 text-xs text-muted-foreground">
+                {r.prepTime && <span>Prep: {r.prepTime.replace('PT', '').toLowerCase()}</span>}
+                {r.cookTime && <span>Cook: {r.cookTime.replace('PT', '').toLowerCase()}</span>}
+                {r.recipeYield && <span>Serves: {r.recipeYield}</span>}
+              </div>
+            )}
+          </div>
+          {r.ingredients && Array.isArray(r.ingredients) && r.ingredients.length > 0 && (
+            <div className="space-y-1">
+              <h4 className="text-sm font-medium flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+                Ingredients ({r.ingredients.length})
+              </h4>
+              <ul className="text-xs text-muted-foreground space-y-1 pl-3">
+                {r.ingredients.map((ing: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className="mt-1 w-3 h-3 border rounded flex-shrink-0" />
+                    {ing}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {r.instructions && Array.isArray(r.instructions) && r.instructions.length > 0 && (
+            <div className="space-y-1">
+              <h4 className="text-sm font-medium flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+                Instructions
+              </h4>
+              <ol className="text-xs text-muted-foreground space-y-2 pl-4 list-decimal">
+                {r.instructions.map((step: string, i: number) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {item.sourceUrl && (
+            <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-2 text-primary hover:underline text-sm">
+              <ExternalLink className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">{item.sourceUrl}</span>
+            </a>
+          )}
+        </div>
+      );
+    }
+
     if (item.type === 'screenshot' && item.imageUrl && !imageError) {
       return (
         <div className="space-y-4">
@@ -489,11 +610,18 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
     }
 
     return (
-      <SecureMarkdown className="max-w-none break-words">
-        {item.content || 'No content'}
-      </SecureMarkdown>
+      <div className="relative group/content max-w-none">
+        <div className="absolute right-0 top-0 z-10 opacity-0 group-hover/content:opacity-100 transition-opacity">
+          <CopyButton content={item.content || ''} variant="outline" size="sm" className="h-8 shadow-sm backdrop-blur-sm bg-background/80" hideText={false} />
+        </div>
+        <SecureMarkdown className="max-w-none break-words">
+          {item.content || 'No content'}
+        </SecureMarkdown>
+      </div>
     );
   };
+
+  console.log("====== ITEM PREVIEW MOUNTED ======", item?.title, !!item?.content, item?.type);
 
   return (
     <div className="w-full bg-background flex flex-col h-full max-md:h-screen max-md:w-screen">
@@ -653,10 +781,10 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
                 priority === 'high'
                   ? 'bg-purple-500/20 text-purple-700 dark:bg-purple-600/30 dark:text-purple-300 border border-purple-500/50'
                   : priority === 'medium'
-                  ? 'bg-amber-500/20 text-amber-700 dark:bg-amber-600/30 dark:text-amber-300 border border-amber-500/50'
-                  : priority === 'low'
-                  ? 'bg-indigo-500/20 text-indigo-700 dark:bg-indigo-600/30 dark:text-indigo-300 border border-indigo-500/50'
-                  : 'bg-gray-500/20 text-gray-700 dark:bg-gray-600/30 dark:text-gray-300 border border-gray-500/50'
+                    ? 'bg-amber-500/20 text-amber-700 dark:bg-amber-600/30 dark:text-amber-300 border border-amber-500/50'
+                    : priority === 'low'
+                      ? 'bg-indigo-500/20 text-indigo-700 dark:bg-indigo-600/30 dark:text-indigo-300 border border-indigo-500/50'
+                      : 'bg-gray-500/20 text-gray-700 dark:bg-gray-600/30 dark:text-gray-300 border border-gray-500/50'
               }
             >
               {priority} priority
@@ -681,7 +809,7 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Assign To</label>
-                <Select value={assignedTo} onValueChange={setAssignedTo}>
+                <Select value={assignedTo || 'none'} onValueChange={(v) => setAssignedTo(v === 'none' ? '' : v)}>
                   <SelectTrigger className="h-8">
                     <SelectValue placeholder="Unassigned" />
                   </SelectTrigger>
@@ -706,21 +834,23 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No project</SelectItem>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-3 h-3 rounded"
-                            style={{ backgroundColor: project.color }}
-                          />
-                          {project.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+                    {
+                      projects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded"
+                              style={{ backgroundColor: project.color }}
+                            />
+                            {project.name}
+                          </div>
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent >
+                </Select >
+              </div >
+            </div >
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground flex items-center justify-between gap-1">
@@ -767,228 +897,240 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
                   </PopoverContent>
                 </Popover>
               </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground flex items-center gap-1">
-                <Bell className="w-3 h-3" />
-                Reminder
-              </label>
-              <Input
-                type="datetime-local"
-                value={reminder ? reminder.slice(0, 16) : ''}
-                onChange={(e) => setReminder(e.target.value ? new Date(e.target.value).toISOString() : null)}
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Bell className="w-3 h-3" />
+                  Reminder
+                </label>
+                <Input
+                  type="datetime-local"
+                  value={reminder ? reminder.slice(0, 16) : ''}
+                  onChange={(e) => setReminder(e.target.value ? new Date(e.target.value).toISOString() : null)}
                   className="h-8"
-              />
+                />
+              </div>
             </div>
-            </div>
-          </div>
-        )}
+          </div >
+        )
+        }
 
         {/* Show due date and reminder when not editing */}
-        {!editing && (dueDate || reminder) && (
-          <div className="flex gap-2 flex-wrap items-center">
-            {dueDate && (() => {
-              const overdue = safeIsPast(dueDate) && !safeIsToday(dueDate);
-              const isDueToday = safeIsToday(dueDate);
-              const isDueTomorrow = safeIsTomorrow(dueDate);
+        {
+          !editing && (dueDate || reminder) && (
+            <div className="flex gap-2 flex-wrap items-center">
+              {dueDate && (() => {
+                const overdue = safeIsPast(dueDate) && !safeIsToday(dueDate);
+                const isDueToday = safeIsToday(dueDate);
+                const isDueTomorrow = safeIsTomorrow(dueDate);
 
-              let colorClass = 'text-muted-foreground border-muted-foreground';
-              const DueDateIcon = CalendarIcon;
-              let label = safeFormatAbsolute(dueDate, 'MMM d, yyyy', 'No date');
+                let colorClass = 'text-muted-foreground border-muted-foreground';
+                const DueDateIcon = CalendarIcon;
+                let label = safeFormatAbsolute(dueDate, 'MMM d, yyyy', 'No date');
 
-              if (overdue) {
-                colorClass = 'text-purple-500 border-purple-500 bg-purple-500/10';
-                label = `Overdue: ${safeFormatAbsolute(dueDate, 'MMM d', 'overdue')}`;
-              } else if (isDueToday) {
-                colorClass = 'text-amber-500 border-amber-500 bg-amber-500/10';
-                label = 'Due today';
-              } else if (isDueTomorrow) {
-                colorClass = 'text-indigo-500 border-indigo-500 bg-indigo-500/10';
-                label = 'Due tomorrow';
-              }
+                if (overdue) {
+                  colorClass = 'text-purple-500 border-purple-500 bg-purple-500/10';
+                  label = `Overdue: ${safeFormatAbsolute(dueDate, 'MMM d', 'overdue')}`;
+                } else if (isDueToday) {
+                  colorClass = 'text-amber-500 border-amber-500 bg-amber-500/10';
+                  label = 'Due today';
+                } else if (isDueTomorrow) {
+                  colorClass = 'text-indigo-500 border-indigo-500 bg-indigo-500/10';
+                  label = 'Due tomorrow';
+                }
 
-              return (
-                <div className="flex items-center gap-1 group/due">
-                  <Badge variant="outline" className={`gap-1 ${colorClass}`}>
-                    <DueDateIcon className="w-3 h-3" />
-                    {label}
+                return (
+                  <div className="flex items-center gap-1 group/due">
+                    <Badge variant="outline" className={`gap-1 ${colorClass}`}>
+                      <DueDateIcon className="w-3 h-3" />
+                      {label}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 opacity-0 group-hover/due:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                      onClick={handleClearDueDate}
+                      title="Clear due date"
+                    >
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
+                );
+              })()}
+              {reminder && (() => {
+                const isReminderPast = safeIsPast(reminder) && !item.reminderSent;
+
+                return (
+                  <Badge variant="outline" className={`gap-1 ${isReminderPast ? 'text-purple-500 border-purple-500 bg-purple-500/10' : 'text-indigo-500 border-indigo-500 bg-indigo-500/10'}`}>
+                    <Bell className="w-3 h-3" />
+                    {isReminderPast ? 'Missed: ' : ''}{safeFormatAbsolute(reminder, 'MMM d, h:mm a', 'Reminder')}
                   </Badge>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 opacity-0 group-hover/due:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                    onClick={handleClearDueDate}
-                    title="Clear due date"
-                  >
-                    <X className="w-3 h-3" />
-                  </Button>
-                </div>
-              );
-            })()}
-            {reminder && (() => {
-              const isReminderPast = safeIsPast(reminder) && !item.reminderSent;
-
-              return (
-                <Badge variant="outline" className={`gap-1 ${isReminderPast ? 'text-purple-500 border-purple-500 bg-purple-500/10' : 'text-indigo-500 border-indigo-500 bg-indigo-500/10'}`}>
-                  <Bell className="w-3 h-3" />
-                  {isReminderPast ? 'Missed: ' : ''}{safeFormatAbsolute(reminder, 'MMM d, h:mm a', 'Reminder')}
-                </Badge>
-              );
-            })()}
-          </div>
-        )}
+                );
+              })()}
+            </div>
+          )
+        }
 
         {/* Linked Items (Knowledge Graph) */}
-        {!editing && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Link2 className="w-4 h-4 text-muted-foreground" />
-                Linked Items ({links.length})
+        {
+          !editing && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Link2 className="w-4 h-4 text-muted-foreground" />
+                  Linked Items ({links.length})
+                </div>
+                <LinkCreator sourceItemId={item.id} onLinkCreated={fetchLinks} />
               </div>
-              <LinkCreator sourceItemId={item.id} onLinkCreated={fetchLinks} />
-            </div>
 
-            {links.length > 0 ? (
-              <div className="space-y-2">
-                {links.map((link) => {
-                  const isSource = link.sourceItem?.id === item.id;
-                  const relatedItem = isSource ? link.targetItem : link.sourceItem;
-                  if (!relatedItem) return null;
+              {links.length > 0 ? (
+                <div className="space-y-2">
+                  {links.map((link) => {
+                    const isSource = link.sourceItem?.id === item.id;
+                    const relatedItem = isSource ? link.targetItem : link.sourceItem;
+                    if (!relatedItem) return null;
 
-                  const relationLabels: Record<string, string> = {
-                    related: 'Related to',
-                    'depends-on': isSource ? 'Depends on' : 'Dependency of',
-                    blocks: isSource ? 'Blocks' : 'Blocked by',
-                    references: isSource ? 'References' : 'Referenced by',
-                  };
+                    const relationLabels: Record<string, string> = {
+                      related: 'Related to',
+                      'depends-on': isSource ? 'Depends on' : 'Dependency of',
+                      blocks: isSource ? 'Blocks' : 'Blocked by',
+                      references: isSource ? 'References' : 'Referenced by',
+                    };
 
-                  return (
-                    <div
-                      key={link.id}
-                      className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border group"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div
-                          className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded transition-colors p-1"
-                          onClick={() => onSelectItem?.(relatedItem.id)}
-                        >
-                          <Badge variant="outline" className="text-xs whitespace-nowrap">
-                            {relationLabels[link.relationType] || link.relationType}
-                          </Badge>
-                          <span className="text-sm truncate">{relatedItem.title}</span>
-                          <Badge variant="secondary" className="text-xs">
-                            {relatedItem.type}
-                          </Badge>
-                        </div>
-                        {link.note && (
-                          <div className="text-xs text-muted-foreground mt-1 ml-1 truncate">
-                            {link.note}
-                          </div>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2"
-                        onClick={() => handleDeleteLink(link.id, link.sourceId!, link.targetId!)}
-                        disabled={deletingLinkId === link.id}
+                    return (
+                      <div
+                        key={link.id}
+                        className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border group"
                       >
-                        {deletingLinkId === link.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Link2Off className="w-3.5 h-3.5" />
-                        )}
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground p-2">
-                No links yet. Add a link to connect this item to others.
-              </div>
-            )}
-          </div>
-        )}
+                        <div className="flex-1 min-w-0">
+                          <div
+                            className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded transition-colors p-1"
+                            onClick={() => onSelectItem?.(relatedItem.id)}
+                          >
+                            <Badge variant="outline" className="text-xs whitespace-nowrap">
+                              {relationLabels[link.relationType] || link.relationType}
+                            </Badge>
+                            <span className="text-sm truncate">{relatedItem.title}</span>
+                            <Badge variant="secondary" className="text-xs">
+                              {relatedItem.type}
+                            </Badge>
+                          </div>
+                          {link.note && (
+                            <div className="text-xs text-muted-foreground mt-1 ml-1 truncate">
+                              {link.note}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2"
+                          onClick={() => handleDeleteLink(link.id, link.sourceId!, link.targetId!)}
+                          disabled={deletingLinkId === link.id}
+                        >
+                          {deletingLinkId === link.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Link2Off className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground p-2">
+                  No links yet. Add a link to connect this item to others.
+                </div>
+              )}
+            </div>
+          )
+        }
 
         {/* Content */}
-        {!editing && (item.type === 'note' || item.type === 'scratchpad' || item.type === 'webpage') && item.content && item.content.length > 500 && (
-          <SummaryCard content={item.content} maxLength={3} />
-        )}
-        {editing && item.type !== 'screenshot' && item.type !== 'ocr' ? (
-          <Textarea value={content} onChange={(e) => setContent(e.target.value)} rows={10} className="resize-none" />
-        ) : (
-          renderContent()
-        )}
-      </div>
+        {
+          !editing && (item.type === 'note' || item.type === 'scratchpad' || item.type === 'webpage') && item.content && item.content.length > 500 && (
+            <SummaryCard content={item.content} maxLength={3} />
+          )
+        }
+        {
+          editing && item.type !== 'screenshot' && item.type !== 'ocr' ? (
+            <AITextarea value={content} onValueChange={setContent} onChange={(e) => setContent(e.target.value)} rows={10} className="resize-none" placeholder="Edit content... (Ctrl+Space for AI)" />
+          ) : (
+            renderContent()
+          )
+        }
+      </div >
 
       {/* Footer */}
-      <div className="p-4 border-t flex gap-2">
-        {editing ? (
-          <>
-            <Button variant="outline" onClick={() => setEditing(false)} className="flex-1">
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saving} className="flex-1">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-              Save
-            </Button>
-          </>
-        ) : (
-          <>
-            {item.status === 'trash' && onRestore ? (
-              <Button variant="outline" onClick={onRestore} className="flex-1">
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Restore
+      < div className="p-4 border-t flex gap-2" >
+        {
+          editing ? (
+            <>
+              <Button variant="outline" onClick={() => setEditing(false)} className="flex-1">
+                Cancel
               </Button>
-            ) : item.status === 'archived' ? (
-              <Button variant="outline" onClick={() => setEditing(true)} className="flex-1">
-                Edit
+              <Button onClick={handleSave} disabled={saving} className="flex-1">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
+                Save
               </Button>
-            ) : (
-              <>
-                <Button variant="outline" onClick={() => setEditing(true)}>
+            </>
+          ) : (
+            <>
+              {item.status === 'trash' && onRestore ? (
+                <Button variant="outline" onClick={onRestore} className="flex-1">
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Restore
+                </Button>
+              ) : item.status === 'archived' ? (
+                <Button variant="outline" onClick={() => setEditing(true)} className="flex-1">
                   Edit
                 </Button>
-                {onArchive && (
-                  <Button variant="outline" onClick={onArchive}>
-                    <Archive className="w-4 h-4 mr-2" />
-                    Archive
+              ) : (
+                <>
+                  <Button variant="outline" onClick={() => setEditing(true)}>
+                    Edit
                   </Button>
-                )}
-              </>
-            )}
-            <Button variant="destructive" onClick={onDelete} className={item.status !== 'trash' && onArchive ? 'flex-1' : 'flex-1'}>
-              <Trash2 className="w-4 h-4 mr-2" />
-              {item.status === 'trash' ? 'Delete Forever' : 'Delete'}
-            </Button>
-          </>
-        )}
-      </div>
+                  {onArchive && (
+                    <Button variant="outline" onClick={onArchive}>
+                      <Archive className="w-4 h-4 mr-2" />
+                      Archive
+                    </Button>
+                  )}
+                </>
+              )}
+              <Button variant="destructive" onClick={onDelete} className={item.status !== 'trash' && onArchive ? 'flex-1' : 'flex-1'}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                {item.status === 'trash' ? 'Delete Forever' : 'Delete'}
+              </Button>
+            </>
+          )}
+      </div >
 
       {/* Expanded Image Modal */}
-      {expandedImage && (
-        <div
-          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
-          onClick={() => setExpandedImage(null)}
-        >
-          <div className="relative max-w-5xl max-h-full">
-            <img
-              src={expandedImage}
-              alt="Expanded view"
-              className="max-w-full max-h-[90vh] object-contain rounded-lg"
-              onClick={(e) => e.stopPropagation()}
-            />
-            <button
-              onClick={() => setExpandedImage(null)}
-              className="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors"
-              aria-label="Close expanded image"
-            >
-              <XIcon className="w-8 h-8" />
-            </button>
+      {
+        expandedImage && (
+          <div
+            className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+            onClick={() => setExpandedImage(null)}
+          >
+            <div className="relative max-w-5xl max-h-full">
+              <img
+                src={expandedImage}
+                alt="Expanded view"
+                className="max-w-full max-h-[90vh] object-contain rounded-lg"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <button
+                onClick={() => setExpandedImage(null)}
+                className="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors"
+                aria-label="Close expanded image"
+              >
+                <XIcon className="w-8 h-8" />
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 }

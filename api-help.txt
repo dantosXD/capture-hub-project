@@ -1,0 +1,23 @@
+
+
+Usage: api [options]
+       api -c file
+       api [-c file] [-n name] [-t path] [-m method] [-d dataJsonString]
+       api [-c file] -u url [-p password] [-n name] [-t path] [-m method] [-d dataJsonString]
+  Use --caproverName to use an already logged in CapRover machine
+  Use --caproverUrl and --caproverPassword to login on the fly to a CapRover machine, if also --caproverName is present, login credetials are stored locally
+
+Call a generic API on a specific CapRover machine. Use carefully only if you really know what you are doing!
+
+Options:
+  -c, --configFile <value>        path of the file where all parameters are defined in JSON or YAML format
+                                    see others options to know config file parameters' names
+                                    this is mainly for automation purposes, see docs (env: CAPROVER_CONFIG_FILE)
+  -u, --caproverUrl <value>       CapRover machine URL address, it is "[http[s]://][captain.]your-captain-root.domain" (env: CAPROVER_URL)
+  -p, --caproverPassword <value>  CapRover machine password (env: CAPROVER_PASSWORD)
+  -n, --caproverName <value>      CapRover machine name, to load/store credentials (env: CAPROVER_NAME)
+  -t, --path <value>              API path to call, starting with / (eg. "/user/system/info") (env: CAPROVER_API_PATH)
+  -m, --method <value>            API method to call, one of: "GET", "POST" (env: CAPROVER_API_METHOD)
+  -d, --data <value>              API data JSON string (or also JSON object from config file), for "GET" method they are interpreted as querystring values to be appended to the path (env: CAPROVER_API_DATA)
+  -o, --output <value>            where to log API response output: if "true" log to console, if "false" suppress output, otherwise log to specified file (overwrite already existing) (env: CAPROVER_API_OUTPUT) (default: "true")
+  -h, --help                      output usage information

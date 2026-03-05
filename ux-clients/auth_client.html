@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capture Hub - Zero Trust Login</title>
+    <!-- Tailwind for rapid UI simulation -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SimpleWebAuthn Browser JS bundle via unpkg -->
+    <script src="https://unpkg.com/@simplewebauthn/browser/dist/bundle/index.umd.min.js"></script>
+</head>
+<body class="bg-gray-950 text-white min-h-screen flex items-center justify-center font-sans">
+    
+    <div class="bg-gray-900 border border-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
+        <div class="flex items-center justify-center mb-6">
+            <svg class="w-8 h-8 text-indigo-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+            <h1 class="text-2xl font-bold tracking-tight">Capture Hub</h1>
+        </div>
+        
+        <p class="text-gray-400 text-sm mb-8 text-center">Zero-Trust Architecture Entry Gateway</p>
+
+        <input type="text" id="username" placeholder="Username / ID" class="w-full bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 mb-4 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors">
+        
+        <div class="space-y-3">
+            <button id="registerBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex justify-center items-center">
+                Register Device (Passkey)
+            </button>
+            <button id="loginBtn" class="w-full bg-gray-800 hover:bg-gray-700 text-white font-medium py-3 px-4 rounded-lg transition-colors border border-gray-700 flex justify-center items-center">
+                Authenticate
+            </button>
+        </div>
+
+        <div id="status" class="mt-6 text-sm text-center text-gray-400 min-h-[20px]"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api/auth';
+        const { startRegistration, startAuthentication } = SimpleWebAuthnBrowser;
+
+        function setStatus(msg, type="info") {
+            const el = document.getElementById('status');
+            el.textContent = msg;
+            el.className = `mt-6 text-sm text-center min-h-[20px] ${type === 'error' ? 'text-red-400' : 'text-green-400'}`;
+        }
+
+        document.getElementById('registerBtn').addEventListener('click', async () => {
+            const username = document.getElementById('username').value;
+            if(!username) return setStatus('Please enter a username', 'error');
+
+            try {
+                setStatus('Initiating Registration...', 'info');
+                
+                // 1. Get options
+                const respOptions = await fetch(`${API_BASE}/register-options`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username })
+                });
+                const options = await respOptions.json();
+                
+                // 2. Browser interaction
+                const response = await startRegistration(options);
+                
+                // 3. Verify
+                setStatus('Verifying setup...', 'info');
+                const verifyResp = await fetch(`${API_BASE}/register-verify`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username, body: response })
+                });
+                
+                const verifyResult = await verifyResp.json();
+                if(verifyResult.verified) {
+                    setStatus('Passkey Registration Successful!', 'success');
+                } else {
+                    setStatus('Registration Failed', 'error');
+                }
+            } catch (err) {
+                 setStatus(`Error: ${err.message}`, 'error');
+            }
+        });
+
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+             const username = document.getElementById('username').value;
+            if(!username) return setStatus('Please enter a username', 'error');
+
+            try {
+                setStatus('Initiating Login...', 'info');
+                
+                // 1. Get options
+                const respOptions = await fetch(`${API_BASE}/login-options`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username })
+                });
+
+                if (!respOptions.ok) {
+                    return setStatus('User not found. Register first.', 'error');
+                }
+
+                const options = await respOptions.json();
+                
+                // 2. Browser interaction
+                 const response = await startAuthentication(options);
+                 
+                // 3. Verify
+                 setStatus('Verifying Auth...', 'info');
+                const verifyResp = await fetch(`${API_BASE}/login-verify`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username, body: response })
+                });
+                
+                const verifyResult = await verifyResp.json();
+                if(verifyResult.verified && verifyResult.token) {
+                    setStatus('Login Successful! Access Granted.', 'success');
+                } else {
+                    setStatus('Authentication Failed', 'error');
+                }
+            } catch (err) {
+                 setStatus(`Error: ${err.message}`, 'error');
+            }
+        });
+    </script>
+</body>
+</html>

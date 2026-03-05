@@ -78,29 +78,26 @@ export function OfflineIndicator() {
 
   // Don't render during SSR to avoid hydration mismatch (connection state is client-only)
   // Don't show indicator when connected and online (use DeviceIndicator instead)
-  if (!mounted || state === 'connected') {
+  if (!mounted || state === 'connected' || state === 'disconnected') {
     return null;
   }
 
   return (
     <div className="fixed bottom-4 left-4 z-50">
       <div
-        className={`flex items-center gap-2 px-3 py-2 rounded-lg shadow-lg border ${
-          state === 'offline'
-            ? 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
-            : state === 'reconnecting'
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg shadow-lg border ${state === 'offline'
+          ? 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+          : state === 'reconnecting'
             ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
             : 'bg-slate-500/10 border-slate-500/20 text-slate-600 dark:text-slate-400'
-        }`}
+          }`}
       >
         {state === 'offline' && <WifiOff className="w-4 h-4 animate-pulse" />}
         {state === 'reconnecting' && <Loader2 className="w-4 h-4 animate-spin" />}
-        {state === 'disconnected' && <AlertCircle className="w-4 h-4" />}
 
         <span className="text-sm font-medium">
           {state === 'offline' && 'Offline'}
           {state === 'reconnecting' && 'Reconnecting...'}
-          {state === 'disconnected' && 'Disconnected'}
         </span>
 
         {queueSize > 0 && (

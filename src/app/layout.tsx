@@ -75,6 +75,7 @@ export default function RootLayout({
             </WebSocketProvider>
           </ThemeProvider>
         </ErrorBoundaryWrapper>
+        <script dangerouslySetInnerHTML={{ __html: `if ('serviceWorker' in navigator) { navigator.serviceWorker.getRegistrations().then(r => r.forEach(reg => reg.unregister())); }` }} />
         <Toaster position="bottom-right" richColors />
       </body>
     </html>

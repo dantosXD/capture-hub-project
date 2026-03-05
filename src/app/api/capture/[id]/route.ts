@@ -46,10 +46,12 @@ export async function PUT(
     const { id } = await params;
     const body = await request.json();
 
-    // Feature #425: Check if item exists before updating
-    const existingItem = await db.captureItem.findUnique({
-      where: { id },
-    });
+    // Use raw SQL to avoid P2023 DateTime coercion on existing rows
+    type RawItem = { id: string; type: string; title: string; content: string | null; extractedText: string | null; imageUrl: string | null; sourceUrl: string | null; metadata: string | null; tags: string; priority: string; status: string; assignedTo: string | null; dueDate: string | null; reminder: string | null; reminderSent: number; pinned: number; projectId: string | null; processedAt: string | null; processedBy: string | null; createdAt: string; updatedAt: string };
+    const rows = await db.$queryRawUnsafe<RawItem[]>(
+      `SELECT * FROM CaptureItem WHERE id = ?`, id
+    );
+    const existingItem = rows[0] || null;
 
     if (!existingItem) {
       return NextResponse.json(
@@ -179,29 +181,54 @@ export async function PUT(
       }
     }
 
-    const item = await db.captureItem.update({
-      where: { id },
-      data: updateData,
-    });
+    // Build raw SQL SET clauses to avoid Prisma DateTime coercion on update return value
+    const setClauses: string[] = ['updatedAt = ?'];
+    const setValues: unknown[] = [updateData.updatedAt];
+
+    if (updateData.title !== undefined) { setClauses.push('title = ?'); setValues.push(updateData.title); }
+    if (updateData.content !== undefined) { setClauses.push('content = ?'); setValues.push(updateData.content); }
+    if (updateData.extractedText !== undefined) { setClauses.push('extractedText = ?'); setValues.push(updateData.extractedText); }
+    if (updateData.imageUrl !== undefined) { setClauses.push('imageUrl = ?'); setValues.push(updateData.imageUrl); }
+    if (updateData.sourceUrl !== undefined) { setClauses.push('sourceUrl = ?'); setValues.push(updateData.sourceUrl); }
+    if (updateData.metadata !== undefined) { setClauses.push('metadata = ?'); setValues.push(updateData.metadata); }
+    if (updateData.tags !== undefined) { setClauses.push('tags = ?'); setValues.push(updateData.tags); }
+    if (updateData.priority !== undefined) { setClauses.push('priority = ?'); setValues.push(updateData.priority); }
+    if (updateData.status !== undefined) { setClauses.push('status = ?'); setValues.push(updateData.status); }
+    if (updateData.assignedTo !== undefined) { setClauses.push('assignedTo = ?'); setValues.push(updateData.assignedTo); }
+    if (updateData.dueDate !== undefined) { setClauses.push('dueDate = ?'); setValues.push(updateData.dueDate); }
+    if (updateData.reminder !== undefined) { setClauses.push('reminder = ?'); setValues.push(updateData.reminder); }
+    if (updateData.pinned !== undefined) { setClauses.push('pinned = ?'); setValues.push(updateData.pinned ? 1 : 0); }
+    if (updateData.projectId !== undefined) { setClauses.push('projectId = ?'); setValues.push(updateData.projectId); }
+
+    await db.$executeRawUnsafe(
+      `UPDATE CaptureItem SET ${setClauses.join(', ')} WHERE id = ?`,
+      ...setValues, id
+    );
+
+    // Construct synthetic response using existing data merged with updates
+    const updatedAt = updateData.updatedAt as string;
+    const mergedItem = {
+      ...existingItem,
+      ...updateData,
+      id,
+      updatedAt,
+      pinned: updateData.pinned !== undefined ? updateData.pinned : !!existingItem.pinned,
+      reminderSent: !!existingItem.reminderSent,
+      tags: safeParseTags(updateData.tags ?? existingItem.tags),
+      metadata: safeParseJSON(updateData.metadata ?? existingItem.metadata),
+    };
 
     // Broadcast update to all connected clients
     broadcastItemUpdated({
-      id: item.id,
+      id,
       changes: updateData,
-      updatedAt: item.updatedAt,
+      updatedAt,
     });
 
     // Broadcast stats update
-    broadcastStatsUpdated({
-      type: 'capture',
-      timestamp: item.updatedAt,
-    });
+    broadcastStatsUpdated({ type: 'capture', timestamp: updatedAt });
 
-    return NextResponse.json({
-      ...item,
-      tags: safeParseTags(item.tags),
-      metadata: safeParseJSON(item.metadata),
-    });
+    return NextResponse.json(mergedItem);
   } catch (error) {
     const classified = classifyError(error);
     return apiError(classified.message === 'Internal server error' ? 'Failed to update item' : classified.message, classified.status, {
