@@ -67,6 +67,14 @@ export function isAllowedOrigin(origin: string | null): boolean {
     return true;
   }
 
+  // In development, allow any localhost / 127.0.0.1 origin regardless of port
+  // (covers browser preview proxies, dev tools, etc.)
+  if (process.env.NODE_ENV === 'development') {
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      return true;
+    }
+  }
+
   // Exact match
   if (ALLOWED_ORIGINS.has(origin)) {
     return true;
