@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FloatingHub } from '@/components/FloatingHub';
+import { TodayView } from '@/components/TodayView/TodayView';
+import { DailyReview } from '@/components/DailyReview/DailyReview';
 import { InboxList } from '@/components/Inbox/InboxList';
 import { Header } from '@/components/Header/Header';
 import { AIDashboard } from '@/components/Dashboard/AIDashboard';
@@ -38,12 +40,15 @@ import {
   FileText,
   Settings,
   PenSquare,
+  CalendarCheck,
+  ClipboardList,
 } from 'lucide-react';
 import { MobileBottomNav } from '@/components/MobileBottomNav/MobileBottomNav';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { AnimatedCountBadge } from '@/components/AnimatedCountBadge';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { useServiceWorker } from '@/lib/service-worker';
+import { useReminderPoller } from '@/hooks/useReminderPoller';
 
 interface CaptureItem {
   id: string;
@@ -86,6 +91,7 @@ export default function Home() {
 
   // Service worker for PWA support
   useServiceWorker();
+  useReminderPoller();
 
   // Cleanup all tracked timeouts on unmount
   useEffect(() => () => timeoutsRef.current.forEach(clearTimeout), []);
@@ -438,6 +444,28 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
         >
           <Button
             role="tab"
+            aria-selected={activeView === 'today'}
+            aria-controls="tabpanel"
+            variant={activeView === 'today' ? 'default' : 'outline'}
+            className="gap-2"
+            onClick={() => setActiveView('today')}
+          >
+            <CalendarCheck className="w-4 h-4" aria-hidden="true" />
+            Today
+          </Button>
+          <Button
+            role="tab"
+            aria-selected={activeView === 'review'}
+            aria-controls="tabpanel"
+            variant={activeView === 'review' ? 'default' : 'outline'}
+            className="gap-2"
+            onClick={() => setActiveView('review')}
+          >
+            <ClipboardList className="w-4 h-4" aria-hidden="true" />
+            Daily Review
+          </Button>
+          <Button
+            role="tab"
             aria-selected={activeView === 'dashboard'}
             aria-controls="tabpanel"
             variant={activeView === 'dashboard' ? 'default' : 'outline'}
@@ -579,7 +607,30 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
               transition={{ duration: 0.15 }}
               className="relative"
             >
-              {activeView === 'dashboard' ? (
+              {activeView === 'today' ? (
+                <SectionErrorWrapper sectionName="Today">
+                  <TodayView
+                    onSelectItem={(id) => {
+                      setSearchResultItem(id);
+                      setActiveView('inbox');
+                      const tid = setTimeout(() => setSearchResultItem(null), 100);
+                      timeoutsRef.current.push(tid);
+                    }}
+                  />
+                </SectionErrorWrapper>
+              ) : activeView === 'review' ? (
+                <SectionErrorWrapper sectionName="Daily Review">
+                  <DailyReview
+                    onSelectItem={(id) => {
+                      setSearchResultItem(id);
+                      setActiveView('inbox');
+                      const tid = setTimeout(() => setSearchResultItem(null), 100);
+                      timeoutsRef.current.push(tid);
+                    }}
+                    onClose={() => setActiveView('inbox')}
+                  />
+                </SectionErrorWrapper>
+              ) : activeView === 'dashboard' ? (
                 <SectionErrorWrapper sectionName="Dashboard">
                   <AIDashboard
                     onNavigate={handleNavigate}

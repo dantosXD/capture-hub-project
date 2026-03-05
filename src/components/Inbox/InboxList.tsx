@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { InboxItem } from './InboxItem';
 import { ItemPreview } from './ItemPreview';
@@ -140,6 +140,10 @@ export function InboxList({
   // Panel collapse state for tablets
   const [listPanelCollapsed, setListPanelCollapsed] = useState(false);
   const [previewPanelCollapsed, setPreviewPanelCollapsed] = useState(false);
+
+  // Keyboard navigation
+  const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+  const focusedItem = useMemo(() => items[focusedIndex] ?? null, [items, focusedIndex]);
 
   // Confirmation dialog for permanent delete
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<CaptureItem | null>(null);
@@ -827,6 +831,71 @@ export function InboxList({
     }
   };
 
+  // Keyboard navigation handler
+  useEffect(() => {
+    const isInInput = () => {
+      const el = document.activeElement;
+      const tag = el?.tagName.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || (el as HTMLElement)?.isContentEditable;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isInInput()) return;
+      if (!items.length) return;
+
+      const key = e.key.toLowerCase();
+
+      if (key === 'j' || key === 'arrowdown') {
+        e.preventDefault();
+        setFocusedIndex(prev => Math.min(prev + 1, items.length - 1));
+      } else if (key === 'k' || key === 'arrowup') {
+        e.preventDefault();
+        setFocusedIndex(prev => Math.max(prev - 1, 0));
+      } else if ((key === 'enter' || key === ' ') && focusedItem) {
+        e.preventDefault();
+        setPreviewItem(focusedItem);
+        onPreviewItem?.(focusedItem);
+      } else if (key === 'escape') {
+        if (previewItem) {
+          setPreviewItem(null);
+          onPreviewItem?.(null);
+        } else {
+          setFocusedIndex(-1);
+        }
+      } else if (key === 'a' && (previewItem || focusedItem)) {
+        const target = previewItem || focusedItem;
+        if (target && statusFilter !== 'trash' && statusFilter !== 'archived') {
+          e.preventDefault();
+          handleArchiveItem(target.id);
+        }
+      } else if (key === 'd' && (previewItem || focusedItem)) {
+        const target = previewItem || focusedItem;
+        if (target) {
+          e.preventDefault();
+          if (statusFilter === 'trash') {
+            handlePermanentDelete(target.id);
+          } else {
+            handleDeleteItem(target.id);
+          }
+        }
+      } else if (key === 'p' && (previewItem || focusedItem)) {
+        const target = previewItem || focusedItem;
+        if (target && statusFilter !== 'trash') {
+          e.preventDefault();
+          handleTogglePin(target.id);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [items, focusedItem, focusedIndex, previewItem, statusFilter, onPreviewItem, handleArchiveItem, handleDeleteItem, handlePermanentDelete, handleTogglePin]);
+
+  // Reset focusedIndex when items list changes significantly
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [statusFilter, typeFilter]);
+
   // List panel content (reused in both mobile and desktop)
   const listPanelContent = listPanelCollapsed ? (
     <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4">
@@ -1048,7 +1117,7 @@ export function InboxList({
                     <InboxItem
                       item={item}
                       selected={selectedItems.includes(item.id)}
-                      isActive={previewItem?.id === item.id}
+                      isActive={previewItem?.id === item.id || focusedIndex === index}
                       onSelect={(checked) => handleSelectItem(item.id, checked)}
                       onClick={() => {
                         setPreviewItem(item);

@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { NlpDateInput } from '@/components/ui/nlp-date-input';
 import {
   Popover,
   PopoverContent,
@@ -909,10 +910,10 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
                   <Bell className="w-3 h-3" />
                   Reminder
                 </label>
-                <Input
-                  type="datetime-local"
-                  value={reminder ? reminder.slice(0, 16) : ''}
-                  onChange={(e) => setReminder(e.target.value ? new Date(e.target.value).toISOString() : null)}
+                <NlpDateInput
+                  value={reminder || ''}
+                  onChange={(iso) => setReminder(iso)}
+                  placeholder="tomorrow at 9am, in 2 hours…"
                   className="h-8"
                 />
               </div>
@@ -979,78 +980,101 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
 
         {/* Linked Items (Knowledge Graph) */}
         {
-          !editing && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Link2 className="w-4 h-4 text-muted-foreground" />
-                  Linked Items ({links.length})
-                </div>
-                <LinkCreator sourceItemId={item.id} onLinkCreated={fetchLinks} />
-              </div>
+          !editing && (() => {
+            const outgoing = links.filter(l => l.sourceId === item.id);
+            const incoming = links.filter(l => l.targetId === item.id);
 
-              {links.length > 0 ? (
-                <div className="space-y-2">
-                  {links.map((link) => {
-                    const isSource = link.sourceItem?.id === item.id;
-                    const relatedItem = isSource ? link.targetItem : link.sourceItem;
-                    if (!relatedItem) return null;
+            const renderLinkRow = (link: LinkedItem, isSource: boolean) => {
+              const relatedItem = isSource ? link.targetItem : link.sourceItem;
+              if (!relatedItem) return null;
 
-                    const relationLabels: Record<string, string> = {
-                      related: 'Related to',
-                      'depends-on': isSource ? 'Depends on' : 'Dependency of',
-                      blocks: isSource ? 'Blocks' : 'Blocked by',
-                      references: isSource ? 'References' : 'Referenced by',
-                    };
+              const relationLabels: Record<string, string> = {
+                related: 'Related to',
+                'depends-on': isSource ? 'Depends on' : 'Dependency of',
+                blocks: isSource ? 'Blocks' : 'Blocked by',
+                references: isSource ? 'References' : 'Referenced by',
+              };
 
-                    return (
-                      <div
-                        key={link.id}
-                        className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border group"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div
-                            className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded transition-colors p-1"
-                            onClick={() => onSelectItem?.(relatedItem.id)}
-                          >
-                            <Badge variant="outline" className="text-xs whitespace-nowrap">
-                              {relationLabels[link.relationType] || link.relationType}
-                            </Badge>
-                            <span className="text-sm truncate">{relatedItem.title}</span>
-                            <Badge variant="secondary" className="text-xs">
-                              {relatedItem.type}
-                            </Badge>
-                          </div>
-                          {link.note && (
-                            <div className="text-xs text-muted-foreground mt-1 ml-1 truncate">
-                              {link.note}
-                            </div>
-                          )}
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2"
-                          onClick={() => handleDeleteLink(link.id, link.sourceId!, link.targetId!)}
-                          disabled={deletingLinkId === link.id}
-                        >
-                          {deletingLinkId === link.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Link2Off className="w-3.5 h-3.5" />
-                          )}
-                        </Button>
+              return (
+                <div
+                  key={link.id}
+                  className="flex items-center justify-between p-2 bg-muted/50 rounded-lg border group"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded transition-colors p-1"
+                      onClick={() => onSelectItem?.(relatedItem.id)}
+                    >
+                      <Badge variant="outline" className="text-xs whitespace-nowrap">
+                        {relationLabels[link.relationType] || link.relationType}
+                      </Badge>
+                      <span className="text-sm truncate">{relatedItem.title}</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {relatedItem.type}
+                      </Badge>
+                    </div>
+                    {link.note && (
+                      <div className="text-xs text-muted-foreground mt-1 ml-1 truncate">
+                        {link.note}
                       </div>
-                    );
-                  })}
+                    )}
+                  </div>
+                  {isSource && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2"
+                      onClick={() => handleDeleteLink(link.id, link.sourceId!, link.targetId!)}
+                      disabled={deletingLinkId === link.id}
+                    >
+                      {deletingLinkId === link.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Link2Off className="w-3.5 h-3.5" />
+                      )}
+                    </Button>
+                  )}
                 </div>
-              ) : (
-                <div className="text-sm text-muted-foreground p-2">
-                  No links yet. Add a link to connect this item to others.
+              );
+            };
+
+            return (
+              <div className="space-y-3">
+                {/* Outgoing links */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <Link2 className="w-4 h-4 text-muted-foreground" />
+                      Links ({outgoing.length})
+                    </div>
+                    <LinkCreator sourceItemId={item.id} onLinkCreated={fetchLinks} />
+                  </div>
+                  {outgoing.length > 0 ? (
+                    <div className="space-y-2">
+                      {outgoing.map(l => renderLinkRow(l, true))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground p-2">
+                      No outgoing links. Add a link to connect this item to others.
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )
+
+                {/* Backlinks (incoming) */}
+                {incoming.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                      <FolderOpen className="w-4 h-4" />
+                      Backlinks ({incoming.length})
+                    </div>
+                    <div className="space-y-2">
+                      {incoming.map(l => renderLinkRow(l, false))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()
         }
 
         {/* Content */}

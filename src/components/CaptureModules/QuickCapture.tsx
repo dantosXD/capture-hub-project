@@ -5,13 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AITextarea } from '@/components/ui/ai-writing-toolbar';
 import { Badge } from '@/components/ui/badge';
-import { Plus, X, Loader2, Check, Sparkles } from 'lucide-react';
+import { Plus, X, Loader2, Check, Sparkles, Calendar, XCircle } from 'lucide-react';
 import { useOptimisticMutation } from '@/hooks/useOptimisticMutation';
 import { captureItemMutations } from '@/lib/api-client';
 import { toast } from 'sonner';
 import { ContentSuggestions } from './ContentSuggestions';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { parseDateNL, previewDateNL } from '@/lib/parse-date-nl';
 
 interface QuickCaptureProps {
   onComplete?: () => void;
@@ -25,6 +26,8 @@ export function QuickCapture({ onComplete, onNavigateToItem }: QuickCaptureProps
   const [tagInput, setTagInput] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [detectedDate, setDetectedDate] = useState<{ iso: string; label: string } | null>(null);
+  const [acceptedDate, setAcceptedDate] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   // Optimistic mutation hook
@@ -37,6 +40,20 @@ export function QuickCapture({ onComplete, onNavigateToItem }: QuickCaptureProps
       errorMessage: 'Failed to save note. Please try again.',
     },
   );
+
+  // Detect natural language dates in title + content
+  useEffect(() => {
+    if (acceptedDate) return; // Don't overwrite an accepted date
+    const combined = `${title} ${content}`.trim();
+    if (!combined) { setDetectedDate(null); return; }
+    const iso = parseDateNL(combined);
+    const label = iso ? previewDateNL(combined) : null;
+    if (iso && label) {
+      setDetectedDate({ iso, label });
+    } else {
+      setDetectedDate(null);
+    }
+  }, [title, content, acceptedDate]);
 
   // Auto-focus title input when component mounts
   useEffect(() => {
@@ -113,21 +130,58 @@ export function QuickCapture({ onComplete, onNavigateToItem }: QuickCaptureProps
         title: title.trim(),
         content: content.trim() || null,
         tags,
+        ...(acceptedDate ? { dueDate: acceptedDate } : {}),
         ...(selectedProjectId ? { projectId: selectedProjectId, status: 'assigned' } : {}),
       };
 
       const result = await mutation.mutate(data);
+      const savedId: string | undefined = (result as any)?.id;
 
       // Show success toast with item title
       toast.success(`"${data.title}" captured successfully!`, {
         icon: <Check className="w-4 h-4" />,
       });
 
+      // Background: fetch AI tag suggestions and apply them with a toast
+      if (savedId && (data.title || data.content)) {
+        fetch('/api/ai/suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: data.title, content: data.content, tags, excludeId: savedId }),
+        })
+          .then(r => r.ok ? r.json() : null)
+          .then(async (suggestions) => {
+            const aiTags: string[] = suggestions?.suggestedTags ?? [];
+            const newTags = aiTags.filter((t: string) => !tags.includes(t));
+            if (newTags.length === 0) return;
+            // PATCH the item to add the AI tags
+            await fetch(`/api/capture/${savedId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tags: [...tags, ...newTags] }),
+            });
+            toast(`AI added tags: ${newTags.map((t: string) => `#${t}`).join(' ')}`, {
+              icon: <Sparkles className="w-4 h-4 text-purple-500" />,
+              duration: 6000,
+              action: { label: 'Undo', onClick: () => {
+                fetch(`/api/capture/${savedId}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ tags }),
+                });
+              }},
+            });
+          })
+          .catch(() => { /* non-critical */ });
+      }
+
       // Clear form and close modal on success
       setTitle('');
       setContent('');
       setTags([]);
       setSelectedProjectId(null);
+      setAcceptedDate(null);
+      setDetectedDate(null);
 
       // Close the modal after successful save
       onComplete?.();
@@ -167,6 +221,46 @@ export function QuickCapture({ onComplete, onNavigateToItem }: QuickCaptureProps
           rows={5}
           className="resize-none"
         />
+
+        {/* Detected date badge */}
+        {detectedDate && !acceptedDate && (
+          <div className="flex items-center gap-2 p-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm">
+            <Calendar className="w-4 h-4 text-blue-500 flex-shrink-0" />
+            <span className="flex-1 text-blue-700 dark:text-blue-300">
+              Detected: <strong>{detectedDate.label}</strong>
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs text-blue-600 hover:bg-blue-500/20"
+              onClick={() => setAcceptedDate(detectedDate.iso)}
+            >
+              Use as due date
+            </Button>
+            <button
+              onClick={() => { setDetectedDate(null); setAcceptedDate('__dismissed__'); }}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Dismiss"
+            >
+              <XCircle className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        {acceptedDate && acceptedDate !== '__dismissed__' && (
+          <div className="flex items-center gap-2 p-2 bg-green-500/10 border border-green-500/30 rounded-lg text-sm">
+            <Calendar className="w-4 h-4 text-green-500 flex-shrink-0" />
+            <span className="flex-1 text-green-700 dark:text-green-300">
+              Due: <strong>{previewDateNL(new Date(acceptedDate).toISOString()) ?? acceptedDate}</strong>
+            </span>
+            <button
+              onClick={() => { setAcceptedDate(null); }}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Remove due date"
+            >
+              <XCircle className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Tags - optional, minimal UI */}
         {tags.length > 0 && (

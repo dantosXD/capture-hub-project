@@ -3,6 +3,63 @@ import { db } from '@/lib/db';
 import { safeParseTags } from '@/lib/parse-utils';
 import { apiError, classifyError } from '@/lib/api-route-handler';
 import { validateRequest } from '@/lib/api-security';
+import { isAIConfigured } from '@/lib/ai';
+
+// Use ZAI directly for suggestions — avoids importing heavy ai.ts bundle paths
+import ZAI from 'z-ai-web-dev-sdk';
+
+let _zai: Awaited<ReturnType<typeof ZAI.create>> | null = null;
+async function getZAIForSuggestions() {
+  if (_zai) return _zai;
+  _zai = await ZAI.create();
+  return _zai;
+}
+
+async function llmProcessingSuggestions(title: string, content: string, tags: string[]): Promise<string[]> {
+  try {
+    const zai = await getZAIForSuggestions();
+    const result = await zai.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a GTD (Getting Things Done) assistant. Given a capture item, suggest 2-3 concise, actionable next steps. Return ONLY a JSON array of strings. Example: ["Add a due date and assign to Tasks", "Break this into sub-tasks"]',
+        },
+        {
+          role: 'user',
+          content: `Title: ${title}\nContent: ${(content || '').substring(0, 800)}\nTags: ${tags.join(', ')}`,
+        },
+      ],
+    });
+    const raw = result.choices[0]?.message?.content?.trim() || '[]';
+    const parsed: string[] = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(s => typeof s === 'string').slice(0, 3) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function llmSuggestTags(title: string, content: string, existingTags: string[]): Promise<string[]> {
+  try {
+    const zai = await getZAIForSuggestions();
+    const result = await zai.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a tagging assistant. Suggest 3-5 relevant lowercase tags for the given content. Do NOT include tags already in the existing list. Return ONLY a JSON array of strings.',
+        },
+        {
+          role: 'user',
+          content: `Title: ${title}\nContent: ${(content || '').substring(0, 800)}\nExisting tags: ${existingTags.join(', ')}`,
+        },
+      ],
+    });
+    const raw = result.choices[0]?.message?.content?.trim() || '[]';
+    const parsed: string[] = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(s => typeof s === 'string' && !existingTags.includes(s)).slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * AI Content Suggestions Endpoint
@@ -170,7 +227,25 @@ export async function POST(request: NextRequest) {
       return suggestions.slice(0, 3);
     };
 
-    const processingSuggestions = generateProcessingSuggestions();
+    // Use LLM for processing suggestions and tag suggestions when AI is configured
+    let processingSuggestions: string[];
+    let finalSuggestedTags: string[];
+
+    if (isAIConfigured()) {
+      const [llmProcessing, llmTags] = await Promise.allSettled([
+        llmProcessingSuggestions(title || '', content || '', providedTags),
+        llmSuggestTags(title || '', content || '', providedTags),
+      ]);
+      processingSuggestions = llmProcessing.status === 'fulfilled' && llmProcessing.value.length > 0
+        ? llmProcessing.value
+        : generateProcessingSuggestions();
+      finalSuggestedTags = llmTags.status === 'fulfilled' && llmTags.value.length > 0
+        ? llmTags.value
+        : suggestedTags;
+    } else {
+      processingSuggestions = generateProcessingSuggestions();
+      finalSuggestedTags = suggestedTags;
+    }
 
     // 4. Suggest related projects based on name-in-content matching
     // Note: project-scoped filtering (by item.projectId) is not yet implemented.
@@ -210,7 +285,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       relatedItems,
-      suggestedTags,
+      suggestedTags: finalSuggestedTags,
       processingSuggestions,
       suggestedProjects,
     });

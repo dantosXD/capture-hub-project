@@ -11,6 +11,7 @@ import {
   Globe,
   X,
   Command,
+  Mic,
 } from 'lucide-react';
 import { CaptureModal } from './CaptureModal';
 import { QuickCapture } from './CaptureModules/QuickCapture';
@@ -18,6 +19,7 @@ import { ScratchPad } from './CaptureModules/ScratchPad';
 import { OCRTool } from './CaptureModules/OCRTool';
 import { ScreenshotCapture } from './CaptureModules/ScreenshotCapture';
 import { WebCapture } from './CaptureModules/WebCapture';
+import { VoiceCapture } from './CaptureModules/VoiceCapture';
 import { getAriaExpanded, getAriaHasPopup } from '@/lib/accessibility';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -64,6 +66,13 @@ const captureModules: CaptureModule[] = [
     icon: <Globe className="w-5 h-5" />,
     color: 'bg-indigo-600/80',
     description: 'Save web pages',
+  },
+  {
+    id: 'voice',
+    name: 'Voice Capture',
+    icon: <Mic className="w-5 h-5" />,
+    color: 'bg-rose-500/80',
+    description: 'Speak to capture',
   },
 ];
 
@@ -182,6 +191,8 @@ export function FloatingHub({
         return <ScreenshotCapture onComplete={handleCaptureComplete} />;
       case 'webpage':
         return <WebCapture onComplete={handleCaptureComplete} />;
+      case 'voice':
+        return <VoiceCapture onComplete={handleCaptureComplete} />;
       default:
         return null;
     }
