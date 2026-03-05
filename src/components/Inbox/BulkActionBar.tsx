@@ -75,6 +75,7 @@ export function BulkActionBar({
         setProjects(data.projects || []);
       } catch (error) {
         console.error('Failed to fetch projects:', error);
+        toast.error('Failed to load projects');
       } finally {
         setLoadingProjects(false);
       }

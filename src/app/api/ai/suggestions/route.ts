@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { safeParseTags } from '@/lib/parse-utils';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 /**
  * AI Content Suggestions Endpoint
@@ -11,8 +12,14 @@ import { apiError, classifyError } from '@/lib/api-route-handler';
  * - Related items (based on tags and content similarity)
  * - Tag recommendations (based on content analysis)
  * - GTD processing actions (what to do with the item)
+ *
+ * Note: Project-scoped suggestions are not yet implemented.
+ * Project scoring currently uses only name-in-content matching.
  */
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'standard' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { title, content, tags = [], type = 'note', excludeId } = body;
@@ -165,7 +172,8 @@ export async function POST(request: NextRequest) {
 
     const processingSuggestions = generateProcessingSuggestions();
 
-    // 4. Suggest related projects
+    // 4. Suggest related projects based on name-in-content matching
+    // Note: project-scoped filtering (by item.projectId) is not yet implemented.
     const projects = await db.project.findMany({
       select: {
         id: true,
@@ -177,7 +185,7 @@ export async function POST(request: NextRequest) {
       where: { status: 'active' },
     });
 
-    // Score projects by content similarity
+    // Score projects by content similarity (name appears in search content)
     const suggestedProjects = projects
       .map(project => {
         let score = 0;
@@ -187,12 +195,6 @@ export async function POST(request: NextRequest) {
         if (searchContent.includes(projectName)) {
           score += 10;
         }
-
-        // Check for related items in this project
-        const relatedItemsInProject = relatedItems.filter(item => {
-          // We'd need to fetch item.projectId but for now use simple matching
-          return false;
-        });
 
         return { ...project, score };
       })
@@ -213,15 +215,12 @@ export async function POST(request: NextRequest) {
       suggestedProjects,
     });
   } catch (error) {
-    const classified = classifyError(error);
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
     return apiError(
-      classified.message === 'Internal server error' ? 'Failed to generate suggestions' : classified.message,
-      classified.status,
-      {
-        details: classified.details,
-        logPrefix: '[POST /api/ai/suggestions]',
-        error,
-      }
+      message === 'Internal server error' ? 'Failed to generate suggestions' : message,
+      status,
+      { details: safeDetails, logPrefix: '[POST /api/ai/suggestions]', error }
     );
   }
 }

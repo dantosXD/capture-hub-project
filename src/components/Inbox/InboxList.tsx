@@ -149,7 +149,7 @@ export function InboxList({
   // Track deleted items for undo
   const deletedItemsRef = useRef<Map<string, { previousStatus: string; timeoutId: NodeJS.Timeout }>>(new Map());
   // Track countdown intervals for cleanup
-  const countdownIntervalsRef = useRef<NodeJS.Timeout[]>([]);
+  const countdownIntervalsRef = useRef<ReturnType<typeof setInterval>[]>([]);
 
   // Update status filter when prop changes — reset all filters and expand list panel
   useEffect(() => {

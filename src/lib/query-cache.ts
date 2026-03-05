@@ -3,6 +3,8 @@
  * Reduces database load for frequently accessed, rarely-changing data.
  */
 
+import { createHash } from 'crypto';
+
 interface CacheEntry<T> {
   data: T;
   expiresAt: number;
@@ -11,6 +13,7 @@ interface CacheEntry<T> {
 class QueryCache {
   private cache = new Map<string, CacheEntry<unknown>>();
   private defaultTTL = 5000; // 5 seconds default TTL
+  private maxSize = 500; // maximum number of entries before evicting oldest
 
   /**
    * Get cached data if available and not expired
@@ -31,6 +34,13 @@ class QueryCache {
    * Store data in cache with TTL
    */
   set<T>(key: string, data: T, ttlMs = this.defaultTTL): void {
+    // Evict the oldest (first) entry if at capacity
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey);
+      }
+    }
     this.cache.set(key, {
       data,
       expiresAt: Date.now() + ttlMs,
@@ -98,7 +108,8 @@ export async function cachedQuery<T>(
 }
 
 /**
- * Generate cache key from query parameters
+ * Generate cache key from query parameters using SHA-256 to avoid collisions
+ * from pipe-separated strings with special characters.
  */
 export function generateCacheKey(
   prefix: string,
@@ -106,7 +117,7 @@ export function generateCacheKey(
 ): string {
   const sortedParams = Object.keys(params)
     .sort()
-    .map(key => `${key}:${JSON.stringify(params[key])}`)
-    .join('|');
-  return `${prefix}:${sortedParams}`;
+    .map(key => `${key}=${JSON.stringify(params[key])}`)
+    .join('&');
+  return createHash('sha256').update(`${prefix}:${sortedParams}`).digest('hex').slice(0, 32);
 }

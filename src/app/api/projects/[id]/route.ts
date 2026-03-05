@@ -5,12 +5,16 @@ import { safeParseTags, safeParseJSON } from '@/lib/parse-utils';
 import type { ProjectUpdateInput } from '@/lib/prisma-types';
 import { apiError, classifyError } from '@/lib/api-route-handler';
 import { conflictTracker } from '@/lib/conflict-resolution';
+import { validateRequest } from '@/lib/api-security';
 
 // GET - Get a specific project with its items
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { id } = await params;
 
@@ -43,12 +47,9 @@ export async function GET(
       },
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch project' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/projects/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[GET /api/projects/[id]]', error });
   }
 }
 
@@ -57,6 +58,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { id } = await params;
     const body = await request.json();
@@ -145,12 +149,9 @@ export async function PATCH(
 
     return NextResponse.json({ project });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to update project' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[PATCH /api/projects/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[PATCH /api/projects/[id]]', error });
   }
 }
 
@@ -159,6 +160,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { id } = await params;
 
@@ -194,11 +198,8 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to delete project' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[DELETE /api/projects/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[DELETE /api/projects/[id]]', error });
   }
 }

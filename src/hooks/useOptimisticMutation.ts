@@ -54,7 +54,7 @@ export interface MutationState<TData> {
 }
 
 export interface MutationResult<TData, TVariables> extends MutationState<TData> {
-  mutate: (variables: TVariables) => Promise<void>;
+  mutate: (variables: TVariables) => Promise<TData | undefined>;
   retry: () => Promise<void>;
   reset: () => void;
 }
@@ -186,7 +186,8 @@ export function useOptimisticMutation<TData = any, TVariables = any>({
               const nextRetryCount = retryCountRef.current + 1;
               retryCountRef.current = nextRetryCount;
               setState(prev => ({ ...prev, retryCount: nextRetryCount }));
-              void executeMutationRef.current?.(variables, true);
+              const promise = executeMutationRef.current?.(variables, true);
+              promise?.catch(() => { /* silently handled by the mutation itself */ });
             },
           },
         });

@@ -20,6 +20,7 @@ export interface RetryConfig {
   initialDelay: number;
   maxDelay: number;
   backoffMultiplier: number;
+  totalTimeoutMs?: number;
   retryableErrors?: Array<(error: any) => boolean>;
 }
 
@@ -48,6 +49,8 @@ export async function retryWithBackoff<T>(
   config: Partial<RetryConfig> = {}
 ): Promise<T> {
   const fullConfig = { ...DEFAULT_RETRY_CONFIG, ...config };
+  const totalTimeout = fullConfig.totalTimeoutMs ?? 30_000;
+  const startTime = Date.now();
   let lastError: any;
   let delay = fullConfig.initialDelay;
 
@@ -57,15 +60,33 @@ export async function retryWithBackoff<T>(
     } catch (error) {
       lastError = error;
 
-      // Check if error is retryable
+      // Check if error is retryable BEFORE waiting — throw immediately for non-retryable errors
       const isRetryable = fullConfig.retryableErrors?.some(check => check(error));
 
-      if (!isRetryable || attempt === fullConfig.maxRetries) {
+      if (!isRetryable) {
+        logger.error('Non-retryable error, giving up immediately', error instanceof Error ? error : undefined, {
+          attempt: attempt + 1,
+          maxRetries: fullConfig.maxRetries,
+        });
+        throw error;
+      }
+
+      if (attempt === fullConfig.maxRetries) {
         logger.error('Retry failed, giving up', error instanceof Error ? error : undefined, {
           attempt: attempt + 1,
           maxRetries: fullConfig.maxRetries,
         });
         throw error;
+      }
+
+      // Check total timeout: if elapsed + next delay would exceed totalTimeout, give up now
+      if (Date.now() - startTime + delay > totalTimeout) {
+        logger.error('Total timeout exceeded, giving up', error instanceof Error ? error : undefined, {
+          attempt: attempt + 1,
+          elapsed: Date.now() - startTime,
+          totalTimeout,
+        });
+        throw lastError;
       }
 
       logger.warn(`Attempt ${attempt + 1} failed, retrying in ${delay}ms`, {

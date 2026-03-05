@@ -182,10 +182,7 @@ export function waitForWebSocketMessage(
   timeout: number = 5000
 ): Promise<any> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      client.removeEventListener('message', onMessage);
-      reject(new Error('WebSocket message timeout'));
-    }, timeout);
+    let timer: ReturnType<typeof setTimeout>;
 
     const onMessage = (event: MessageEvent) => {
       clearTimeout(timer);
@@ -197,6 +194,11 @@ export function waitForWebSocketMessage(
         reject(error);
       }
     };
+
+    timer = setTimeout(() => {
+      client.removeEventListener('message', onMessage);
+      reject(new Error('WebSocket message timeout'));
+    }, timeout);
 
     client.addEventListener('message', onMessage);
   });

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSummary } from '@/lib/ai';
+import { validateRequest } from '@/lib/api-security';
+import { apiError, classifyError } from '@/lib/api-route-handler';
 
 // AI Content Summarization Endpoint
 // POST /api/ai/summary
 // Generates concise 1-3 sentence summaries of long-form content
 
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'standard' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { content, maxLength = 3 } = body;
@@ -46,10 +51,8 @@ export async function POST(request: NextRequest) {
       originalLength: content.length,
     });
   } catch (error) {
-    console.error('Error generating summary:', error);
-    return NextResponse.json(
-      { error: 'Failed to generate summary' },
-      { status: 500 }
-    );
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[POST /api/ai/summary]', error });
   }
 }

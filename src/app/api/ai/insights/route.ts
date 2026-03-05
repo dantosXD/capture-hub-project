@@ -3,6 +3,9 @@ import { db } from '@/lib/db';
 import ZAI from 'z-ai-web-dev-sdk';
 import { safeParseTags } from '@/lib/parse-utils';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
+
+const MAX_AI_INPUT_CHARS = 50_000;
 
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 let aiChecked = false;
@@ -25,9 +28,17 @@ async function getZAI() {
 }
 
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'standard' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { context } = body || {};
+
+    // Length cap on context input
+    if (context && typeof context === 'string' && context.length > MAX_AI_INPUT_CHARS) {
+      return apiError('Input too long', 400, { details: 'Maximum 50,000 characters' });
+    }
 
     // Get all items for analysis - use raw SQL to avoid P2023 DateTime coercion errors
     type RawItem = { id: string; title: string; type: string; tags: string | null; status: string; content: string | null; createdAt: string; updatedAt: string; projectId: string | null; processedAt: string | null };
@@ -324,8 +335,11 @@ Respond in JSON format:
           insight = response;
         }
       }
-    } catch (e: any) {
-      console.error('AI insight generation failed:', e);
+    } catch (e) {
+      const { message: eMsg, status: eStatus, details: eDetails } = classifyError(e);
+      const safeDetails = process.env.NODE_ENV === 'production' ? undefined : eDetails;
+      // Log the failure but continue — fall back to contextual suggestions below
+      apiError(eMsg, eStatus, { details: safeDetails, logPrefix: '[POST /api/ai/insights] AI generation failed', error: e });
     }
 
     // Fall back to or supplement with contextual suggestions
@@ -429,11 +443,12 @@ Respond in JSON format:
       productivity,
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to generate insights' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[POST /api/ai/insights]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(
+      message === 'Internal server error' ? 'Failed to generate insights' : message,
+      status,
+      { details: safeDetails, logPrefix: '[POST /api/ai/insights]', error }
+    );
   }
 }

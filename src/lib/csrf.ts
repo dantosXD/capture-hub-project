@@ -7,6 +7,10 @@
  * 3. Referer header validation
  */
 
+import { randomBytes, createHmac } from 'crypto';
+
+const CSRF_SECRET = process.env.CSRF_SECRET || randomBytes(32).toString('hex');
+
 /**
  * Allowed origins for CSRF protection
  * In production, this should be configured via environment variables
@@ -39,8 +43,8 @@ export function initAllowedOrigins(): void {
     }
   }
 
-  // Always add the app URL if configured
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  // Always add the app URL if configured (server-only env var, no NEXT_PUBLIC_ prefix)
+  const appUrl = process.env.APP_URL;
   if (appUrl) {
     ALLOWED_ORIGINS.add(appUrl);
   }
@@ -58,21 +62,14 @@ initAllowedOrigins();
 export function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
 
-  // Exact match
-  if (ALLOWED_ORIGINS.has(origin)) {
+  // Explicit dev bypass via env var (no unconditional localhost bypass)
+  if (process.env.CSRF_DEV_BYPASS === 'true') {
     return true;
   }
 
-  // For development, allow any localhost/127.0.0.1 origin
-  if (process.env.NODE_ENV === 'development') {
-    try {
-      const url = new URL(origin);
-      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
-        return true;
-      }
-    } catch {
-      return false;
-    }
+  // Exact match
+  if (ALLOWED_ORIGINS.has(origin)) {
+    return true;
   }
 
   return false;
@@ -180,35 +177,29 @@ export function getCorsHeaders(origin?: string | null): Record<string, string> {
 }
 
 /**
- * Generate CSRF token for use in forms
- * Note: Since this is a single-tenant app without auth, we use
- * origin-based validation instead of tokens.
- *
- * For future authentication implementation, this can be enhanced
- * with proper CSRF tokens.
+ * Generate a cryptographically secure CSRF token using HMAC-SHA256.
+ * Token format (base64url): nonce.timestamp.signature
  */
 export function generateCsrfToken(): string {
-  // Simple timestamp-based token (not for production use with auth)
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 15);
-  return Buffer.from(`${timestamp}.${random}`).toString('base64');
+  const nonce = randomBytes(16).toString('hex');
+  const ts = Date.now().toString();
+  const sig = createHmac('sha256', CSRF_SECRET).update(`${nonce}.${ts}`).digest('hex');
+  return Buffer.from(`${nonce}.${ts}.${sig}`).toString('base64url');
 }
 
 /**
- * Validate CSRF token
- * Note: This is a placeholder for future authentication implementation
+ * Validate a CSRF token by verifying its HMAC-SHA256 signature and age.
  */
 export function validateCsrfToken(token: string): boolean {
   try {
-    const decoded = Buffer.from(token, 'base64').toString('utf-8');
-    const [timestamp] = decoded.split('.');
-
-    // Token should be from within the last 24 hours
-    const tokenAge = Date.now() - parseInt(timestamp);
-    return tokenAge < 24 * 60 * 60 * 1000 && tokenAge > 0;
-  } catch {
-    return false;
-  }
+    const decoded = Buffer.from(token, 'base64url').toString();
+    const [nonce, ts, sig] = decoded.split('.');
+    if (!nonce || !ts || !sig) return false;
+    const age = Date.now() - parseInt(ts);
+    if (age > 24 * 60 * 60 * 1000 || age < 0) return false;
+    const expected = createHmac('sha256', CSRF_SECRET).update(`${nonce}.${ts}`).digest('hex');
+    return sig === expected;
+  } catch { return false; }
 }
 
 /**

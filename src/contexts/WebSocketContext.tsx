@@ -24,7 +24,6 @@ export interface WebSocketContextValue {
 
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000, 30000];
 const MAX_RECONNECT_DELAY = 30000;
-const HEARTBEAT_INTERVAL = 30000;
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
@@ -42,7 +41,6 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectAttemptRef = useRef(0);
   const eventListenersRef = useRef<Map<string, Set<(data: any) => void>>>(new Map());
   const syncManagerRef = useRef(getSyncManager());
@@ -67,24 +65,6 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       reconnectTimeoutRef.current = null;
     }
   }, []);
-
-  const clearHeartbeatInterval = useCallback(() => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  }, []);
-
-  const startHeartbeat = useCallback(() => {
-    clearHeartbeatInterval();
-
-    heartbeatIntervalRef.current = setInterval(() => {
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: WSEventType.PING }));
-      }
-    }, HEARTBEAT_INTERVAL);
-  }, [clearHeartbeatInterval]);
 
   /**
    * Send message to server
@@ -127,7 +107,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         setStatus('connected');
         reconnectAttemptRef.current = 0;
         clearReconnectTimeout();
-        startHeartbeat();
+        // Note: heartbeats are handled server-side via ping/pong — no client heartbeat needed
       };
 
       ws.onmessage = (event) => {
@@ -150,6 +130,25 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
           // Handle sync response
           if (type === WSEventType.SYNC_RESPONSE) {
             syncManagerRef.current.handleSyncResponse(data as SyncData);
+
+            // Check for any items with conflict metadata and notify listeners
+            const syncData = data as SyncData;
+            const conflictedItems = (syncData.items || []).filter(
+              (item: any) => item._conflict === true || (item.metadata && item.metadata._conflict === true)
+            );
+            if (conflictedItems.length > 0) {
+              const conflictListeners = eventListenersRef.current.get(WSEventType.ITEM_UPDATED);
+              if (conflictListeners) {
+                conflictListeners.forEach((handler) => {
+                  try {
+                    handler({ conflicts: conflictedItems, type: 'conflict', timestamp: syncData.timestamp });
+                  } catch (error) {
+                    console.error('[WebSocket] Error in conflict notification handler:', error);
+                  }
+                });
+              }
+            }
+
             // Don't return - allow event listeners to be notified
           }
 
@@ -178,7 +177,6 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         if (isUnmountedRef.current) return;
         console.log(`[WebSocket] Disconnected (code: ${event.code})`);
         setStatus('disconnected');
-        clearHeartbeatInterval();
 
         // Attempt to reconnect if not intentionally closed
         if (event.code !== 1000 && !isUnmountedRef.current) {
@@ -188,6 +186,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
           console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current})`);
           setStatus('reconnecting');
 
+          // Clear any existing reconnect timeout BEFORE scheduling a new one (prevents stacking)
+          clearReconnectTimeout();
           reconnectTimeoutRef.current = setTimeout(() => {
             if (!isUnmountedRef.current) {
               connect();
@@ -204,7 +204,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       console.error('[WebSocket] Failed to create WebSocket:', error);
       setStatus('disconnected');
     }
-  }, [wsUrl, getReconnectDelay, clearReconnectTimeout, clearHeartbeatInterval, startHeartbeat, send]);
+  }, [wsUrl, getReconnectDelay, clearReconnectTimeout, send]);
 
   /**
    * Register event listener - returns cleanup function
@@ -253,7 +253,6 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
    */
   const disconnect = useCallback(() => {
     clearReconnectTimeout();
-    clearHeartbeatInterval();
     reconnectAttemptRef.current = 0;
 
     const ws = wsRef.current;
@@ -267,7 +266,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     setDeviceName(null);
     setDeviceType(null);
     setLastConnectedAt(null);
-  }, [clearReconnectTimeout, clearHeartbeatInterval]);
+  }, [clearReconnectTimeout]);
 
   // Connect on mount, disconnect on unmount
   // Defer until page load is complete to avoid cold-start connection errors

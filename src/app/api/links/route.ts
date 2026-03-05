@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { broadcastLinkCreated, broadcastLinkDeleted } from '@/lib/ws-broadcast';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 // GET - Get all links for an item
 export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { searchParams } = new URL(request.url);
     const itemId = searchParams.get('itemId');
@@ -20,27 +24,24 @@ export async function GET(request: NextRequest) {
         },
       });
 
-      // Enrich links with source and target item details
-      const enrichedLinks = await Promise.all(
-        links.map(async (link) => {
-          const [sourceItem, targetItem] = await Promise.all([
-            db.captureItem.findUnique({
-              where: { id: link.sourceId },
-              select: { id: true, title: true, type: true, status: true },
-            }),
-            db.captureItem.findUnique({
-              where: { id: link.targetId },
-              select: { id: true, title: true, type: true, status: true },
-            }),
-          ]);
+      // Collect all unique source and target IDs for batch fetch
+      const sourceIds = [...new Set(links.map(l => l.sourceId))];
+      const targetIds = [...new Set(links.map(l => l.targetId))];
+      const allIds = [...new Set([...sourceIds, ...targetIds])];
 
-          return {
-            ...link,
-            sourceItem: sourceItem || null,
-            targetItem: targetItem || null,
-          };
-        })
-      );
+      const fetchedItems = await db.captureItem.findMany({
+        where: { id: { in: allIds } },
+        select: { id: true, title: true, type: true, status: true },
+      });
+
+      const itemMap = new Map(fetchedItems.map(item => [item.id, item]));
+
+      // Join in memory
+      const enrichedLinks = links.map(link => ({
+        ...link,
+        sourceItem: itemMap.get(link.sourceId) ?? null,
+        targetItem: itemMap.get(link.targetId) ?? null,
+      }));
 
       // Extract linked items for easier consumption
       const linkedItems = enrichedLinks
@@ -59,40 +60,38 @@ export async function GET(request: NextRequest) {
       db.itemLink.findMany({ take: limit, skip: offset, orderBy: { createdAt: 'desc' } }),
     ]);
 
-    const enrichedLinks = await Promise.all(
-      links.map(async (link) => {
-        const [sourceItem, targetItem] = await Promise.all([
-          db.captureItem.findUnique({
-            where: { id: link.sourceId },
-            select: { id: true, title: true, type: true, status: true },
-          }),
-          db.captureItem.findUnique({
-            where: { id: link.targetId },
-            select: { id: true, title: true, type: true, status: true },
-          }),
-        ]);
+    // Collect all unique source and target IDs for batch fetch
+    const allSourceIds = [...new Set(links.map(l => l.sourceId))];
+    const allTargetIds = [...new Set(links.map(l => l.targetId))];
+    const allIds = [...new Set([...allSourceIds, ...allTargetIds])];
 
-        return {
-          ...link,
-          sourceItem: sourceItem || null,
-          targetItem: targetItem || null,
-        };
-      })
-    );
+    const fetchedItems = await db.captureItem.findMany({
+      where: { id: { in: allIds } },
+      select: { id: true, title: true, type: true, status: true },
+    });
+
+    const itemMap = new Map(fetchedItems.map(item => [item.id, item]));
+
+    // Join in memory
+    const enrichedLinks = links.map(link => ({
+      ...link,
+      sourceItem: itemMap.get(link.sourceId) ?? null,
+      targetItem: itemMap.get(link.targetId) ?? null,
+    }));
 
     return NextResponse.json({ links: enrichedLinks, total, limit, offset });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch links' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/links]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[GET /api/links]', error });
   }
 }
 
 // POST - Create a new link
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { sourceId, targetId, relationType, note } = body;
@@ -149,17 +148,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ link }, { status: 201 });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to create link' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[POST /api/links]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[POST /api/links]', error });
   }
 }
 
 // DELETE - Remove a link
 export async function DELETE(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { searchParams } = new URL(request.url);
     const sourceId = searchParams.get('sourceId');
@@ -192,11 +191,8 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to delete link' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[DELETE /api/links]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[DELETE /api/links]', error });
   }
 }

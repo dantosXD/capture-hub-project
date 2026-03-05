@@ -12,6 +12,8 @@
 import { generateEmbedding, getCachedEmbeddings } from './embedding-pipeline';
 import { detectDatabaseProvider } from '@/lib/db-config';
 import type { SemanticSearchResult } from './types';
+import { Prisma } from '@prisma/client';
+import { loggers } from '@/lib/logger';
 
 // ============================================================================
 // Cosine Similarity (in-memory, for SQLite fallback)
@@ -87,23 +89,41 @@ async function searchPostgres(
     const { db } = await import('@/lib/db');
 
     const vectorStr = `[${queryVector.join(',')}]`;
-    const excludeClause = excludeIds.length > 0
-      ? `AND e."itemId" NOT IN (${excludeIds.map(id => `'${id}'`).join(',')})`
-      : '';
 
-    const results: any[] = await (db as any).$queryRawUnsafe(`
-      SELECT
-        e."itemId" AS id,
-        1 - (e."vector" <=> '${vectorStr}'::vector) AS score,
-        ci."title",
-        LEFT(ci."content", 200) AS snippet
-      FROM "Embedding" e
-      JOIN "CaptureItem" ci ON ci."id" = e."itemId"
-      WHERE 1 - (e."vector" <=> '${vectorStr}'::vector) >= ${minScore}
-      ${excludeClause}
-      ORDER BY e."vector" <=> '${vectorStr}'::vector
-      LIMIT ${limit}
-    `);
+    let results: any[];
+
+    if (excludeIds.length > 0) {
+      results = await (db as any).$queryRaw(
+        Prisma.sql`
+          SELECT
+            e."itemId" AS id,
+            1 - (e."vector" <=> ${vectorStr}::vector) AS score,
+            ci."title",
+            LEFT(ci."content", 200) AS snippet
+          FROM "Embedding" e
+          JOIN "CaptureItem" ci ON ci."id" = e."itemId"
+          WHERE 1 - (e."vector" <=> ${vectorStr}::vector) >= ${minScore}
+            AND e."itemId" NOT IN (${Prisma.join(excludeIds)})
+          ORDER BY e."vector" <=> ${vectorStr}::vector
+          LIMIT ${limit}
+        `
+      );
+    } else {
+      results = await (db as any).$queryRaw(
+        Prisma.sql`
+          SELECT
+            e."itemId" AS id,
+            1 - (e."vector" <=> ${vectorStr}::vector) AS score,
+            ci."title",
+            LEFT(ci."content", 200) AS snippet
+          FROM "Embedding" e
+          JOIN "CaptureItem" ci ON ci."id" = e."itemId"
+          WHERE 1 - (e."vector" <=> ${vectorStr}::vector) >= ${minScore}
+          ORDER BY e."vector" <=> ${vectorStr}::vector
+          LIMIT ${limit}
+        `
+      );
+    }
 
     return results.map(r => ({
       id: r.id,
@@ -112,7 +132,7 @@ async function searchPostgres(
       snippet: r.snippet || undefined,
     }));
   } catch (error) {
-    console.error('[RAG] PostgreSQL search failed, falling back to in-memory:', error);
+    loggers.ai.error('[RAG] PostgreSQL search failed, falling back to in-memory', error instanceof Error ? error : undefined);
     return searchInMemory(queryVector, limit, minScore, excludeIds);
   }
 }

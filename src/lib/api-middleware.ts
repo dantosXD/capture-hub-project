@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { resolveItemConflict, resolveProjectConflict, resolveLinkConflict, conflictTracker } from '@/lib/conflict-resolution';
 import { classifyError, apiError } from '@/lib/api-route-handler';
+import { loggers } from './logger';
 
 /**
  * Middleware to handle conflict resolution on item updates
@@ -47,7 +48,7 @@ export async function withConflictResolution<T extends { id: string; updatedAt: 
     const clientTimestamp = request.headers.get('x-client-timestamp');
     if (!clientTimestamp) {
       // No timestamp provided - proceed with update (legacy client)
-      console.warn(`[ConflictResolution] No client timestamp provided for ${entityType} ${id}`);
+      loggers.server.warn('[ConflictResolution] No client timestamp provided', { entityType, entityId: id });
       const updated = await updateFn(serverItem);
       return { data: updated, conflictDetected: false };
     }
@@ -67,11 +68,7 @@ export async function withConflictResolution<T extends { id: string; updatedAt: 
 
     // Client's version is older than server's version
     if (clientDate < serverDate) {
-      console.warn(`[ConflictResolution] Stale update detected for ${entityType} ${id}:`, {
-        clientTimestamp,
-        serverTimestamp,
-        diff: Math.abs(serverDate.getTime() - clientDate.getTime()) + 'ms',
-      });
+      loggers.server.warn('[ConflictResolution] Stale update detected', { entityType, entityId: id, diffMs: Math.abs(serverDate.getTime() - clientDate.getTime()) });
 
       // Fetch the actual current data to return
       const currentData = await getEntityById(id, entityType);

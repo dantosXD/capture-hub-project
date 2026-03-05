@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateSummary } from '@/lib/ai';
+import { validateRequest } from '@/lib/api-security';
+import { apiError, classifyError } from '@/lib/api-route-handler';
 
 /**
  * AI Bulk Summarization Endpoint
@@ -8,6 +10,9 @@ import { generateSummary } from '@/lib/ai';
  * Generates a combined summary for multiple items
  */
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'standard' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { items, maxLength = 5 } = body;
@@ -45,10 +50,8 @@ export async function POST(request: NextRequest) {
       totalLength: combinedContent.length,
     });
   } catch (error) {
-    console.error('Error generating bulk summary:', error);
-    return NextResponse.json(
-      { error: 'Failed to generate summary' },
-      { status: 500 }
-    );
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[POST /api/ai/bulk-summary]', error });
   }
 }

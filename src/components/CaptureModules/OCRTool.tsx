@@ -42,8 +42,9 @@ export function OCRTool({ onComplete }: OCRToolProps) {
   const handleScreenCapture = async () => {
     setError(null);
     setCapturing(true);
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
+      stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: 'monitor' } as any,
         audio: false,
       });
@@ -60,7 +61,8 @@ export function OCRTool({ onComplete }: OCRToolProps) {
         const canvas = document.createElement('canvas');
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
-        const ctx = canvas.getContext('2d')!;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas 2D context unavailable');
         ctx.drawImage(bitmap, 0, 0);
         blob = await new Promise<Blob>((resolve) =>
           canvas.toBlob((b) => resolve(b!), 'image/png')
@@ -71,8 +73,8 @@ export function OCRTool({ onComplete }: OCRToolProps) {
         video.srcObject = stream;
         video.autoplay = true;
         await new Promise<void>((resolve) => {
-          video.onloadedmetadata = () => {
-            video.play();
+          video.onloadedmetadata = async () => {
+            try { await video.play(); } catch { /* autoplay blocked, continue */ }
             resolve();
           };
         });
@@ -81,7 +83,8 @@ export function OCRTool({ onComplete }: OCRToolProps) {
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d')!;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas 2D context unavailable');
         ctx.drawImage(video, 0, 0);
         blob = await new Promise<Blob>((resolve) =>
           canvas.toBlob((b) => resolve(b!), 'image/png')
@@ -89,9 +92,6 @@ export function OCRTool({ onComplete }: OCRToolProps) {
         video.pause();
         video.srcObject = null;
       }
-
-      // Stop all tracks
-      stream.getTracks().forEach((t) => t.stop());
 
       // Convert blob to base64 and set it
       const reader = new FileReader();
@@ -114,6 +114,7 @@ export function OCRTool({ onComplete }: OCRToolProps) {
         toast.error('Screen capture failed');
       }
     } finally {
+      stream?.getTracks().forEach((t) => t.stop());
       setCapturing(false);
     }
   };
@@ -154,8 +155,9 @@ export function OCRTool({ onComplete }: OCRToolProps) {
   const handleCameraCapture = async () => {
     setError(null);
     setCapturing(true);
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       });
@@ -167,8 +169,8 @@ export function OCRTool({ onComplete }: OCRToolProps) {
       video.playsInline = true;
 
       await new Promise<void>((resolve) => {
-        video.onloadedmetadata = () => {
-          video.play();
+        video.onloadedmetadata = async () => {
+          try { await video.play(); } catch { /* autoplay blocked, continue */ }
           resolve();
         };
       });
@@ -179,10 +181,10 @@ export function OCRTool({ onComplete }: OCRToolProps) {
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d')!;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas 2D context unavailable');
       ctx.drawImage(video, 0, 0);
 
-      stream.getTracks().forEach((t) => t.stop());
       video.pause();
       video.srcObject = null;
 
@@ -211,6 +213,7 @@ export function OCRTool({ onComplete }: OCRToolProps) {
         toast.info('Camera access denied');
       }
     } finally {
+      stream?.getTracks().forEach((t) => t.stop());
       setCapturing(false);
     }
   };
@@ -816,7 +819,7 @@ export function OCRTool({ onComplete }: OCRToolProps) {
             <div className={`relative rounded-lg border bg-muted/30 overflow-hidden ${isExpanded ? 'fixed inset-4 z-50 bg-background/95 backdrop-blur p-4' : ''}`}>
               <div className={`overflow-auto ${isExpanded ? 'h-[calc(100vh-200px)]' : 'max-h-64'} flex items-center justify-center`}>
                 <img
-                  src={image}
+                  src={image ?? undefined}
                   alt="Preview"
                   className="max-w-full h-auto transition-transform duration-200"
                   style={{ transform: `scale(${imageZoom})`, transformOrigin: 'center' }}

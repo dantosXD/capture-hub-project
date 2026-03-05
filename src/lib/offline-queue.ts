@@ -13,6 +13,8 @@
  * - DELETE /api/projects/[id] (delete project)
  */
 
+import { loggers } from './logger';
+
 export interface QueuedOperation {
   id: string;
   method: string;
@@ -39,7 +41,7 @@ export function getQueuedOperations(): QueuedOperation[] {
       return JSON.parse(stored);
     }
   } catch (error) {
-    console.error('[OfflineQueue] Failed to read from localStorage:', error);
+    loggers.server.error('[OfflineQueue] Failed to read from localStorage', error instanceof Error ? error : new Error(String(error)));
   }
 
   return [];
@@ -54,7 +56,7 @@ function saveQueuedOperations(operations: QueuedOperation[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(operations));
   } catch (error) {
-    console.error('[OfflineQueue] Failed to save to localStorage:', error);
+    loggers.server.error('[OfflineQueue] Failed to save to localStorage', error instanceof Error ? error : new Error(String(error)));
   }
 }
 
@@ -70,7 +72,7 @@ export function queueOperation(
 
   // Limit queue size
   if (operations.length >= MAX_QUEUE_SIZE) {
-    console.warn('[OfflineQueue] Queue is full, removing oldest operation');
+    loggers.server.warn('[OfflineQueue] Queue is full, removing oldest operation');
     operations.shift();
   }
 
@@ -87,7 +89,7 @@ export function queueOperation(
   operations.push(operation);
   saveQueuedOperations(operations);
 
-  console.log(`[OfflineQueue] Queued operation: ${method} ${url} (total: ${operations.length})`);
+  loggers.server.debug('[OfflineQueue] Queued operation', { method, url, total: operations.length });
   return operation;
 }
 
@@ -108,9 +110,9 @@ export function clearQueue(): void {
 
   try {
     localStorage.removeItem(STORAGE_KEY);
-    console.log('[OfflineQueue] Queue cleared');
+    loggers.server.debug('[OfflineQueue] Queue cleared');
   } catch (error) {
-    console.error('[OfflineQueue] Failed to clear queue:', error);
+    loggers.server.error('[OfflineQueue] Failed to clear queue', error instanceof Error ? error : new Error(String(error)));
   }
 }
 
@@ -142,14 +144,14 @@ async function retryOperation(operation: QueuedOperation): Promise<boolean> {
     const response = await fetch(url, options);
 
     if (response.ok) {
-      console.log(`[OfflineQueue] Successfully retried: ${method} ${url}`);
+      loggers.server.debug('[OfflineQueue] Successfully retried', { method, url });
       return true;
     } else {
-      console.warn(`[OfflineQueue] Retry failed: ${method} ${url} - ${response.status}`);
+      loggers.server.warn('[OfflineQueue] Retry failed', { method, url, status: response.status });
       return false;
     }
   } catch (error) {
-    console.error(`[OfflineQueue] Retry error: ${method} ${url}`, error);
+    loggers.server.error('[OfflineQueue] Retry error', error instanceof Error ? error : new Error(String(error)), { method, url });
     return false;
   }
 }
@@ -162,11 +164,11 @@ export async function processQueue(): Promise<number> {
   const operations = getQueuedOperations();
 
   if (operations.length === 0) {
-    console.log('[OfflineQueue] No operations to retry');
+    loggers.server.debug('[OfflineQueue] No operations to retry');
     return 0;
   }
 
-  console.log(`[OfflineQueue] Processing ${operations.length} queued operations...`);
+  loggers.server.debug('[OfflineQueue] Processing queued operations', { count: operations.length });
 
   let successCount = 0;
   const failedOps: QueuedOperation[] = [];
@@ -174,7 +176,7 @@ export async function processQueue(): Promise<number> {
   for (const operation of operations) {
     // Skip if max retries reached
     if (operation.retries >= operation.maxRetries) {
-      console.warn(`[OfflineQueue] Skipping operation (max retries): ${operation.url}`);
+      loggers.server.warn('[OfflineQueue] Skipping operation (max retries)', { url: operation.url });
       failedOps.push(operation);
       continue;
     }
@@ -210,7 +212,7 @@ export async function processQueue(): Promise<number> {
     saveQueuedOperations(updatedOps);
   }
 
-  console.log(`[OfflineQueue] Processed ${operations.length} operations: ${successCount} succeeded`);
+  loggers.server.debug('[OfflineQueue] Processed operations', { total: operations.length, succeeded: successCount });
 
   return successCount;
 }

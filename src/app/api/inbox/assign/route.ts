@@ -4,15 +4,34 @@ import { broadcastItemBulkUpdate, broadcastStatsUpdated } from '@/lib/ws-broadca
 import { safeParseTags, safeParseJSON } from '@/lib/parse-utils';
 import type { CaptureItemUpdateInput } from '@/lib/prisma-types';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 // POST - Assign items to categories
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { ids, status, assignedTo, priority, dueDate, tags, addTags, projectId } = body;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return NextResponse.json({ error: 'Item IDs are required' }, { status: 400 });
+    }
+
+    // Pre-flight existence check: confirm all requested IDs exist
+    const existingItems = await db.captureItem.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+
+    if (existingItems.length !== ids.length) {
+      const foundIds = new Set(existingItems.map(item => item.id));
+      const missingIds = (ids as string[]).filter(id => !foundIds.has(id));
+      return NextResponse.json(
+        { error: 'Some items were not found', missingIds },
+        { status: 404 }
+      );
     }
 
     const updatePromises = ids.map(async (id: string) => {
@@ -60,7 +79,6 @@ export async function POST(request: NextRequest) {
     if (addTags !== undefined && addTags.length > 0) changes.addTags = addTags;
 
     // Broadcast bulk update event to all connected clients
-    console.log('[API] Broadcasting item:bulk-update for', ids.length, 'items');
     broadcastItemBulkUpdate({
       itemIds: ids,
       changes,
@@ -68,7 +86,6 @@ export async function POST(request: NextRequest) {
     });
 
     // Broadcast stats update
-    console.log('[API] Broadcasting stats:updated');
     broadcastStatsUpdated({
       type: 'inbox',
       timestamp: new Date().toISOString(),
@@ -85,11 +102,8 @@ export async function POST(request: NextRequest) {
       })),
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to assign items' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[POST /api/inbox/assign]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[POST /api/inbox/assign]', error });
   }
 }

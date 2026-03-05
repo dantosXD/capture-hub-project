@@ -5,8 +5,17 @@ import { extractRichContent } from './scraper';
 
 const logger = loggers.ai;
 
+// Typed error subclass for ZAI initialization errors
+class ZAIInitError extends Error {
+  isMissingApiKey?: boolean;
+  isTimeout?: boolean;
+}
+
+const ZAI_ERROR_CACHE_TTL = 60_000; // retry after 1 minute
+
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 let zaiInitError: Error | null = null;
+let zaiInitErrorAt: number | null = null;
 
 // Check if AI is configured without attempting to initialize
 export function isAIConfigured(): boolean {
@@ -14,6 +23,13 @@ export function isAIConfigured(): boolean {
 }
 
 async function getZAI() {
+  // Clear cached error if TTL expired, allowing a retry
+  if (zaiInitError && zaiInitErrorAt && Date.now() - zaiInitErrorAt > ZAI_ERROR_CACHE_TTL) {
+    zaiInitError = null;
+    zaiInitErrorAt = null;
+    zaiInstance = null;
+  }
+
   if (zaiInitError) {
     throw zaiInitError;
   }
@@ -25,17 +41,18 @@ async function getZAI() {
       // Check if API key is configured BEFORE attempting to create ZAI instance
       // This prevents hanging when ZAI.create() tries to connect with no credentials
       if (!process.env.ZAI_API_KEY && !process.env.OPENAI_API_KEY) {
-        const err = new Error('ZAI_API_KEY or OPENAI_API_KEY environment variable is not set');
-        (err as any).isMissingApiKey = true; // Add flag for detection
+        const err = new ZAIInitError('ZAI_API_KEY or OPENAI_API_KEY environment variable is not set');
+        err.isMissingApiKey = true;
         zaiInitError = err;
+        zaiInitErrorAt = Date.now();
         logger.warn('AI API key not configured', { error: err.message });
         throw err;
       }
 
       // Add timeout to prevent hanging on initialization
       const timeoutPromise = new Promise((_, reject) => {
-        const err = new Error('ZAI initialization timeout after 5s');
-        (err as any).isTimeout = true;
+        const err = new ZAIInitError('ZAI initialization timeout after 5s');
+        err.isTimeout = true;
         setTimeout(() => reject(err), 5000);
       });
 
@@ -47,6 +64,7 @@ async function getZAI() {
       logger.info('ZAI instance initialized successfully');
     } catch (error: any) {
       zaiInitError = error;
+      zaiInitErrorAt = Date.now();
       logger.error('Failed to initialize ZAI instance', error);
       throw error;
     }

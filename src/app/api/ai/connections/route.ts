@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import ZAI from 'z-ai-web-dev-sdk';
 import { safeParseTags } from '@/lib/parse-utils';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 
@@ -14,6 +15,9 @@ async function getZAI() {
 }
 
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'standard' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { itemId, limit = 5 } = body;
@@ -106,7 +110,7 @@ export async function POST(request: NextRequest) {
     if (connections.length > 0 && sourceItem.content) {
       try {
         const zai = await getZAI();
-        
+
         const result = await zai.chat.completions.create({
           messages: [
             {
@@ -116,7 +120,7 @@ export async function POST(request: NextRequest) {
             {
               role: 'user',
               content: `Source: "${sourceItem.title}" - ${(sourceItem.content || '').substring(0, 200)}
-              
+
 Potential connections:
 ${connections.map((c, i) => `[${i}] "${c.title}"`).join('\n')}
 
@@ -125,29 +129,38 @@ Return a JSON array of indices sorted by semantic relevance:`,
           ]
         });
 
-        const response = result.choices[0]?.message?.content || '[]';
-        const indices: number[] = JSON.parse(response);
-        
+        const aiResponse = result.choices[0]?.message?.content || '[]';
+        let parsed: number[];
+        try {
+          parsed = JSON.parse(aiResponse);
+        } catch {
+          parsed = connections.map((_, i) => i); // fallback: original order
+        }
+
         // Reorder connections
-        const reordered = indices
+        const reordered = parsed
           .filter(i => i >= 0 && i < connections.length)
           .map(i => connections[i]);
-        
+
         if (reordered.length > 0) {
           return NextResponse.json({ connections: reordered });
         }
       } catch (e) {
-        console.error('AI connection enhancement failed:', e);
+        const { message: eMsg, details: eDetails } = classifyError(e);
+        const safeDetails = process.env.NODE_ENV === 'production' ? undefined : eDetails;
+        // Log the failure but continue — fall back to returning the unenhanced connections below
+        apiError(eMsg, 500, { details: safeDetails, logPrefix: '[POST /api/ai/connections] AI enhancement failed', error: e });
       }
     }
 
     return NextResponse.json({ connections });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to find connections' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[POST /api/ai/connections]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(
+      message === 'Internal server error' ? 'Failed to find connections' : message,
+      status,
+      { details: safeDetails, logPrefix: '[POST /api/ai/connections]', error }
+    );
   }
 }

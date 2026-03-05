@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { safeParseTags, safeParseJSON } from '@/lib/parse-utils';
+import { safeParseTags } from '@/lib/parse-utils';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 /**
  * GET /api/tags - Get all tags with usage counts
  */
 export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { searchParams } = new URL(request.url);
     const sort = searchParams.get('sort') || 'count'; // 'count' | 'name'
@@ -45,12 +49,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ tags });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch tags' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/tags]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[GET /api/tags]', error });
   }
 }
 
@@ -62,6 +63,9 @@ export async function GET(request: NextRequest) {
  * It doesn't create a database record, but returns success if the tag name is valid.
  */
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { name } = body;
@@ -122,12 +126,9 @@ export async function POST(request: NextRequest) {
       },
     }, { status: 201 });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to create tag' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[POST /api/tags]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[POST /api/tags]', error });
   }
 }
 
@@ -135,6 +136,9 @@ export async function POST(request: NextRequest) {
  * PATCH /api/tags - Rename or merge a tag
  */
 export async function PATCH(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const body = await request.json();
     const { oldName, newName, mergeInto } = body;
@@ -153,29 +157,28 @@ export async function PATCH(request: NextRequest) {
         });
       }
 
-      // Get all items with the old tag
+      // Get all items with the old tag using DB pre-filter
       const items = await db.captureItem.findMany({
         where: {
           tags: { contains: oldName },
         },
       });
 
-      // Update each item
-      for (const item of items) {
-        const tags = safeParseTags(item.tags);
-        const index = tags.indexOf(oldName);
-        if (index !== -1) {
-          tags[index] = newName.trim();
-        }
-
-        await db.captureItem.update({
-          where: { id: item.id },
-          data: {
-            tags: JSON.stringify(tags),
-            // updatedAt handled by @updatedAt
-          },
-        });
-      }
+      // Batch all updates in a single transaction
+      await db.$transaction(
+        items
+          .map(item => {
+            const tags = safeParseTags(item.tags);
+            const index = tags.indexOf(oldName);
+            if (index === -1) return null;
+            tags[index] = newName.trim();
+            return db.captureItem.update({
+              where: { id: item.id },
+              data: { tags: JSON.stringify(tags) },
+            });
+          })
+          .filter((op): op is NonNullable<typeof op> => op !== null)
+      );
 
       return NextResponse.json({
         success: true,
@@ -199,31 +202,30 @@ export async function PATCH(request: NextRequest) {
         });
       }
 
-      // Get all items with the old tag
+      // Get all items with the old tag using DB pre-filter
       const items = await db.captureItem.findMany({
         where: {
           tags: { contains: oldName },
         },
       });
 
-      // Update each item - replace old tag with merge target
-      for (const item of items) {
-        const tags = safeParseTags(item.tags);
-        const filteredTags = tags.filter(t => t !== oldName);
+      // Batch all updates in a single transaction
+      await db.$transaction(
+        items.map(item => {
+          const tags = safeParseTags(item.tags);
+          const filteredTags = tags.filter(t => t !== oldName);
 
-        // Add merge target if not already present
-        if (!filteredTags.includes(mergeInto)) {
-          filteredTags.push(mergeInto);
-        }
+          // Add merge target if not already present
+          if (!filteredTags.includes(mergeInto)) {
+            filteredTags.push(mergeInto);
+          }
 
-        await db.captureItem.update({
-          where: { id: item.id },
-          data: {
-            tags: JSON.stringify(filteredTags),
-            // updatedAt handled by @updatedAt
-          },
-        });
-      }
+          return db.captureItem.update({
+            where: { id: item.id },
+            data: { tags: JSON.stringify(filteredTags) },
+          });
+        })
+      );
 
       return NextResponse.json({
         success: true,
@@ -237,12 +239,9 @@ export async function PATCH(request: NextRequest) {
       logPrefix: '[PATCH /api/tags]',
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to update tag' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[PATCH /api/tags]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[PATCH /api/tags]', error });
   }
 }
 
@@ -250,6 +249,9 @@ export async function PATCH(request: NextRequest) {
  * DELETE /api/tags - Delete a tag (remove from all items)
  */
 export async function DELETE(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { searchParams } = new URL(request.url);
     const name = searchParams.get('name');
@@ -260,26 +262,25 @@ export async function DELETE(request: NextRequest) {
       });
     }
 
-    // Get all items with this tag
+    // Get all items with this tag using DB pre-filter
     const items = await db.captureItem.findMany({
       where: {
         tags: { contains: name },
       },
     });
 
-    // Remove tag from each item
-    for (const item of items) {
-      const tags = safeParseTags(item.tags);
-      const filteredTags = tags.filter(t => t !== name);
+    // Batch all removals in a single transaction
+    await db.$transaction(
+      items.map(item => {
+        const tags = safeParseTags(item.tags);
+        const filteredTags = tags.filter(t => t !== name);
 
-      await db.captureItem.update({
-        where: { id: item.id },
-        data: {
-          tags: JSON.stringify(filteredTags),
-          updatedAt: new Date().toISOString(),
-        },
-      });
-    }
+        return db.captureItem.update({
+          where: { id: item.id },
+          data: { tags: JSON.stringify(filteredTags) },
+        });
+      })
+    );
 
     return NextResponse.json({
       success: true,
@@ -287,11 +288,8 @@ export async function DELETE(request: NextRequest) {
       affectedItems: items.length,
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to delete tag' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[DELETE /api/tags]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[DELETE /api/tags]', error });
   }
 }

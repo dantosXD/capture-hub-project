@@ -3,6 +3,7 @@ import { captureWebPage, fetchWebPageBasic, suggestTags, isAIConfigured } from '
 import { db } from '@/lib/db';
 import { broadcastItemCreated, broadcastStatsUpdated } from '@/lib/ws-broadcast';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 // Validate URL format
 function isValidUrl(string: string): boolean {
@@ -16,6 +17,9 @@ function isValidUrl(string: string): boolean {
 
 // POST - Capture web page content
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status ?? 500 });
+
   try {
     const body = await request.json();
     const { url, saveToInbox = true } = body;
@@ -34,13 +38,11 @@ export async function POST(request: NextRequest) {
     if (isAIConfigured()) {
       try {
         webContent = await captureWebPage(url);
-      } catch (aiError: any) {
+      } catch {
         // If AI fails for other reasons, fall back to basic fetch
-        console.log('AI capture failed, using basic fetch for:', url, aiError?.message);
         webContent = await fetchWebPageBasic(url);
       }
     } else {
-      console.log('AI not configured, using basic fetch for:', url);
       webContent = await fetchWebPageBasic(url);
     }
 
@@ -98,8 +100,8 @@ export async function POST(request: NextRequest) {
           reminder: item.reminder,
           reminderSent: item.reminderSent ?? false,
           pinned: item.pinned ?? false,
-          createdAt: item.createdAt,
-          updatedAt: item.updatedAt,
+          createdAt: item.createdAt instanceof Date ? item.createdAt.toISOString() : item.createdAt,
+          updatedAt: item.updatedAt instanceof Date ? item.updatedAt.toISOString() : item.updatedAt,
         });
       } catch (broadcastError) {
         console.error('[POST /api/capture/webpage] Broadcast failed (non-fatal):', broadcastError);
@@ -132,25 +134,8 @@ export async function POST(request: NextRequest) {
       ...webContent,
       tags,
     });
-  } catch (error: any) {
-    // For web capture errors, preserve the specific error message
-    const errorMessage = error?.message || 'Failed to capture web page';
-
-    // Determine appropriate status code
-    let status = 500;
-    if (errorMessage.includes('not found') || errorMessage.includes('404')) {
-      status = 404;
-    } else if (errorMessage.includes('Cannot access') || errorMessage.includes('certificate')) {
-      status = 400;
-    } else if (errorMessage.includes('Server error')) {
-      status = 502;
-    } else if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
-      status = 504;
-    }
-
-    return apiError(errorMessage, status, {
-      logPrefix: '[POST /api/capture/webpage]',
-      error,
-    });
+  } catch (error) {
+    const { message, status, details } = classifyError(error);
+    return apiError(message, status, { details: process.env.NODE_ENV === 'production' ? undefined : details, logPrefix: '[POST /api/capture/webpage]', error });
   }
 }

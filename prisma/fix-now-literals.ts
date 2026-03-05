@@ -36,8 +36,8 @@ async function fixCaptureItems() {
   let fixed = 0;
   for (const item of items) {
     const fallback = new Date().toISOString();
-    const validUpdatedAt = isValidISODate(item.updatedAt) ? item.updatedAt : null;
-    const validCreatedAt = isValidISODate(item.createdAt) ? item.createdAt : null;
+    const validUpdatedAt = isValidISODate(item.updatedAt.toISOString()) ? item.updatedAt.toISOString() : null;
+    const validCreatedAt = isValidISODate(item.createdAt.toISOString()) ? item.createdAt.toISOString() : null;
 
     const newCreatedAt = validCreatedAt ?? validUpdatedAt ?? fallback;
     const newUpdatedAt = validUpdatedAt ?? validCreatedAt ?? fallback;
@@ -66,8 +66,8 @@ async function fixProjects() {
   let fixed = 0;
   for (const project of projects) {
     const fallback = new Date().toISOString();
-    const validUpdatedAt = isValidISODate(project.updatedAt) ? project.updatedAt : null;
-    const validCreatedAt = isValidISODate(project.createdAt) ? project.createdAt : null;
+    const validUpdatedAt = isValidISODate(project.updatedAt.toISOString()) ? project.updatedAt.toISOString() : null;
+    const validCreatedAt = isValidISODate(project.createdAt.toISOString()) ? project.createdAt.toISOString() : null;
 
     const newCreatedAt = validCreatedAt ?? validUpdatedAt ?? fallback;
     const newUpdatedAt = validUpdatedAt ?? validCreatedAt ?? fallback;
@@ -96,8 +96,8 @@ async function fixTemplates() {
   let fixed = 0;
   for (const template of templates) {
     const fallback = new Date().toISOString();
-    const validUpdatedAt = isValidISODate(template.updatedAt) ? template.updatedAt : null;
-    const validCreatedAt = isValidISODate(template.createdAt) ? template.createdAt : null;
+    const validUpdatedAt = isValidISODate(template.updatedAt.toISOString()) ? template.updatedAt.toISOString() : null;
+    const validCreatedAt = isValidISODate(template.createdAt.toISOString()) ? template.createdAt.toISOString() : null;
 
     const newCreatedAt = validCreatedAt ?? validUpdatedAt ?? fallback;
     const newUpdatedAt = validUpdatedAt ?? validCreatedAt ?? fallback;

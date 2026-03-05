@@ -19,6 +19,7 @@ import { eventBus } from '@/contracts/event-bus';
 import { EventType, type EventTypeValue, type DomainEvent } from '@/contracts/events';
 import { broadcast } from './websocket';
 import { WSEventType } from './ws-events';
+import { loggers } from './logger';
 
 // ============================================================================
 // Event Type Mapping (Domain Events → WebSocket Events)
@@ -66,7 +67,7 @@ let errorCount = 0;
  */
 export function initializeEventMesh(): void {
   if (meshInitialized) {
-    console.log('[EventMesh] Already initialized');
+    loggers.server.debug('[EventMesh] Already initialized');
     return;
   }
 
@@ -75,7 +76,7 @@ export function initializeEventMesh(): void {
   meshSubscriptionId = subscription.id;
   meshInitialized = true;
 
-  console.log('[EventMesh] Bridge initialized — domain events will broadcast to WebSocket clients');
+  loggers.server.debug('[EventMesh] Bridge initialized — domain events will broadcast to WebSocket clients');
 }
 
 /**
@@ -90,9 +91,7 @@ async function handleDomainEvent(event: DomainEvent): Promise<void> {
       broadcast(wsEventType, event.payload);
       eventCount++;
 
-      console.log(
-        `[EventMesh] ${event.type} → ${wsEventType} (event #${eventCount}, corr: ${event.metadata.correlationId || 'none'})`
-      );
+      loggers.server.debug('[EventMesh] Event bridged', { eventType: event.type, wsEventType, eventCount, correlationId: event.metadata.correlationId || 'none' });
     } else {
       // New event types without legacy mapping — broadcast with domain event type directly
       broadcast(event.type, {
@@ -105,13 +104,11 @@ async function handleDomainEvent(event: DomainEvent): Promise<void> {
       });
       eventCount++;
 
-      console.log(
-        `[EventMesh] ${event.type} → direct broadcast (event #${eventCount})`
-      );
+      loggers.server.debug('[EventMesh] Event direct broadcast', { eventType: event.type, eventCount });
     }
   } catch (error) {
     errorCount++;
-    console.error(`[EventMesh] Failed to bridge event ${event.type}:`, error);
+    loggers.server.error('[EventMesh] Failed to bridge event', error instanceof Error ? error : new Error(String(error)), { eventType: event.type });
   }
 }
 
@@ -127,7 +124,7 @@ export function shutdownEventMesh(): void {
   meshSubscriptionId = null;
   meshInitialized = false;
 
-  console.log(`[EventMesh] Bridge shut down (${eventCount} events bridged, ${errorCount} errors)`);
+  loggers.server.debug('[EventMesh] Bridge shut down', { eventCount, errorCount });
 }
 
 /**

@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /c/Users/207ds/Desktop/Apps/refactor-companion/capture-hub-project && file=\"${file}\" && if echo \"$file\" | grep -qE '\\.(ts|tsx|js|jsx|mjs)$'; then npx eslint --max-warnings=0 \"$file\" 2>&1 | tail -20; fi"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"${file}\" | grep -qE '(\\.env|\\.env\\.local|\\.env\\.production)$'; then echo 'BLOCKED: Direct edits to .env files are not allowed. Update .env.example or .env.production.template instead.' && exit 2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

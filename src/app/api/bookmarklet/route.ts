@@ -4,10 +4,12 @@ import { suggestTags, captureWebPage } from '@/lib/ai';
 import { broadcastItemCreated, broadcastStatsUpdated } from '@/lib/ws-broadcast';
 import { apiError, classifyError } from '@/lib/api-route-handler';
 import { downloadImage } from '@/lib/storage';
+import { BookmarkletCaptureSchema } from '@/lib/validation-schemas';
 
-// CORS headers for bookmarklet requests from any origin
+// CORS headers for bookmarklet requests — origin controlled by env var
+const allowedOrigin = process.env.BOOKMARKLET_ALLOWED_ORIGINS || '*';
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': allowedOrigin,
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
@@ -35,7 +37,22 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const now = new Date().toISOString();
-    const body = await request.json();
+    const rawBody = await request.json();
+
+    // Validate request body against schema
+    const parseResult = BookmarkletCaptureSchema.safeParse(rawBody);
+    if (!parseResult.success) {
+      const errors = parseResult.error.issues.map(e => ({
+        path: e.path.join('.'),
+        message: e.message,
+      }));
+      return NextResponse.json(
+        { error: 'Validation failed', details: errors },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    const body = rawBody;
     const {
       type = 'note',
       title,
@@ -100,6 +117,20 @@ export async function POST(request: NextRequest) {
     // Handle screenshot / image types
     let imageUrl: string | null = null;
     if ((type === 'screenshot' || type === 'image') && screenshot) {
+      // Pre-check image size via HEAD request before downloading (max 10 MB)
+      const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+      try {
+        const headRes = await fetch(screenshot, { method: 'HEAD' });
+        const contentLength = headRes.headers.get('content-length');
+        if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_BYTES) {
+          return NextResponse.json(
+            { error: 'Screenshot image exceeds the 10 MB size limit' },
+            { status: 400, headers: corsHeaders }
+          );
+        }
+      } catch {
+        // If HEAD request fails, proceed and let downloadImage handle errors
+      }
       // Download the image natively to prevent link rot
       const downloadedPath = await downloadImage(screenshot, 'bk');
       imageUrl = downloadedPath || screenshot;
@@ -135,51 +166,26 @@ export async function POST(request: NextRequest) {
     const validPriorities = ['none', 'low', 'medium', 'high'];
     const priority = validPriorities.includes(userPriority) ? userPriority : 'none';
 
-    // Use raw INSERT to bypass Prisma's DateTime coercion on return value (P2023 on existing bad rows)
-    const itemId = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const nowStr = now;
-
-    await db.$executeRawUnsafe(
-      `INSERT INTO CaptureItem (id, type, title, content, extractedText, imageUrl, sourceUrl, metadata, tags, priority, status, assignedTo, dueDate, reminder, reminderSent, pinned, projectId, processedAt, processedBy, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'inbox', NULL, NULL, NULL, 0, 0, ?, NULL, NULL, ?, ?)`,
-      itemId,
-      type,
-      finalTitle,
-      finalContent || null,
-      imageUrl,
-      sourceUrl || null,
-      JSON.stringify(metadata),
-      JSON.stringify(mergedTags),
-      priority,
-      userProjectId || null,
-      nowStr,
-      nowStr,
-    );
-
-    // Synthetic item object for broadcast (avoids reading back the row)
-    const item = {
-      id: itemId,
-      type,
-      title: finalTitle,
-      content: finalContent || null,
-      extractedText: null,
-      imageUrl,
-      sourceUrl: sourceUrl || null,
-      metadata: JSON.stringify(metadata),
-      tags: JSON.stringify(mergedTags),
-      priority,
-      status: 'inbox',
-      assignedTo: null,
-      projectId: userProjectId || null,
-      dueDate: null,
-      reminder: null,
-      reminderSent: false,
-      pinned: false,
-      processedAt: null,
-      processedBy: null,
-      createdAt: nowStr,
-      updatedAt: nowStr,
-    };
+    // Create item via Prisma ORM (avoids raw SQL injection risk)
+    const item = await db.captureItem.create({
+      data: {
+        type,
+        title: finalTitle,
+        content: finalContent || null,
+        extractedText: null,
+        imageUrl,
+        sourceUrl: sourceUrl || null,
+        metadata: JSON.stringify(metadata),
+        tags: JSON.stringify(mergedTags),
+        priority,
+        status: 'inbox',
+        assignedTo: null,
+        dueDate: null,
+        projectId: userProjectId || null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
 
 
     // Broadcast to all connected clients (non-blocking)
@@ -202,8 +208,8 @@ export async function POST(request: NextRequest) {
         reminder: item.reminder,
         reminderSent: item.reminderSent ?? false,
         pinned: item.pinned ?? false,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
+        createdAt: item.createdAt instanceof Date ? item.createdAt.toISOString() : item.createdAt,
+        updatedAt: item.updatedAt instanceof Date ? item.updatedAt.toISOString() : item.updatedAt,
       });
     } catch (broadcastError) {
       console.error('[POST /api/bookmarklet] Broadcast failed (non-fatal):', broadcastError);
@@ -221,12 +227,8 @@ export async function POST(request: NextRequest) {
       item: { ...item, tags: mergedTags, metadata },
     }, { status: 201, headers: corsHeaders });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(
-      classified.message === 'Internal server error' ? 'Failed to capture content' : classified.message,
-      classified.status,
-      { details: classified.details, logPrefix: '[POST /api/bookmarklet]', error, headers: corsHeaders }
-    );
+    const { message, status, details } = classifyError(error);
+    return apiError(message, status, { details: process.env.NODE_ENV === 'production' ? undefined : details, logPrefix: '[POST /api/bookmarklet]', error, headers: corsHeaders });
   }
 }
 

@@ -30,9 +30,9 @@ const MAX_LOGS = 100;
 function logAICall(log: AICallLog): void {
   aiCallLogs.push(log);
 
-  // Keep only recent logs
+  // Keep only recent logs — remove all excess entries at once (O(excess) vs O(n) shift)
   if (aiCallLogs.length > MAX_LOGS) {
-    aiCallLogs.shift();
+    aiCallLogs.splice(0, aiCallLogs.length - MAX_LOGS);
   }
 
   // Log to console

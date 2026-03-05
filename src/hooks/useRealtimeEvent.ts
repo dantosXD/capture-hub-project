@@ -11,7 +11,7 @@
  *   const items = useRealtimeList('/api/capture', 'item:created', 'item:deleted');
  */
 
-import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEffect, useCallback, useRef, useState, useMemo } from 'react';
 import { useSharedWebSocket } from '@/contexts/WebSocketContext';
 import { WSEventType } from '@/lib/ws-events';
 
@@ -67,6 +67,9 @@ export function useRealtimeEvents<T = any>(
     handlerRef.current = handler;
   }, [handler]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stableKey = useMemo(() => eventTypes.join(','), [eventTypes.join(',')]);
+
   useEffect(() => {
     if (!enabled || !isConnected) return;
 
@@ -77,7 +80,7 @@ export function useRealtimeEvents<T = any>(
     );
 
     return () => cleanups.forEach(cleanup => cleanup());
-  }, [eventTypes.join(','), on, isConnected, enabled]);
+  }, [stableKey, on, isConnected, enabled]);
 }
 
 // ============================================================================

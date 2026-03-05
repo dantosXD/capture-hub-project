@@ -78,12 +78,23 @@ export default function Home() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [activeCaptureModule, setActiveCaptureModule] = useState<string | null>(null);
   const [tagFilter, setTagFilter] = useState<string>('');
+  const [searchFocusTrigger, setSearchFocusTrigger] = useState(0);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // WebSocket for real-time updates
   const { on } = useWebSocket();
 
   // Service worker for PWA support
   useServiceWorker();
+
+  // Cleanup all tracked timeouts on unmount
+  useEffect(() => () => timeoutsRef.current.forEach(clearTimeout), []);
+
+  // Dispatch a custom event whenever the search focus trigger increments
+  useEffect(() => {
+    if (searchFocusTrigger === 0) return;
+    document.dispatchEvent(new CustomEvent('capture-hub:focus-search'));
+  }, [searchFocusTrigger]);
 
   // Command palette action state
   const [previewItem, setPreviewItem] = useState<CaptureItem | null>(null);
@@ -182,7 +193,8 @@ export default function Home() {
   const handleSearchResultClick = useCallback((item: { id: string }) => {
     setSearchResultItem(item.id);
     setActiveView('inbox');
-    setTimeout(() => setSearchResultItem(null), 100);
+    const tid = setTimeout(() => setSearchResultItem(null), 100);
+    timeoutsRef.current.push(tid);
   }, []);
 
   const handleNavigate = useCallback((view: string, options?: { tag?: string }) => {
@@ -197,7 +209,8 @@ export default function Home() {
   const handleSelectItem = useCallback((id: string) => {
     setSearchResultItem(id);
     setActiveView('inbox');
-    setTimeout(() => setSearchResultItem(null), 100);
+    const tid = setTimeout(() => setSearchResultItem(null), 100);
+    timeoutsRef.current.push(tid);
   }, []);
 
   const handleOpenCapture = useCallback((module: string) => {
@@ -321,16 +334,14 @@ ${previewItem.sourceUrl ? `Source: ${previewItem.sourceUrl}\n` : ''}Captured: ${
       metaKey: true,
       ctrlKey: true,
       handler: () => {
-        const searchInput = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement;
-        searchInput?.focus();
+        setSearchFocusTrigger(prev => prev + 1);
       },
       description: 'Focus search bar',
     },
     {
       key: '/',
       handler: () => {
-        const searchInput = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement;
-        searchInput?.focus();
+        setSearchFocusTrigger(prev => prev + 1);
       },
       description: 'Focus search bar',
     },

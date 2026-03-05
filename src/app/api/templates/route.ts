@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import type { TemplateWhereInput } from '@/lib/prisma-types';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest, validateBody } from '@/lib/api-security';
+import { CreateTemplateSchema } from '@/lib/validation-schemas';
 
 // Default templates to seed on first load
 const defaultTemplates = [
@@ -39,14 +41,8 @@ const defaultTemplates = [
   },
 ];
 
-// Track whether we've checked for default templates this session
-let defaultTemplatesSeeded = false;
-
-// Helper function to seed default templates (only runs once per server start)
+// Helper function to seed default templates
 async function ensureDefaultTemplates() {
-  if (defaultTemplatesSeeded) return;
-  defaultTemplatesSeeded = true;
-
   const count = await db.template.count();
 
   // Only seed if no templates exist
@@ -64,11 +60,21 @@ async function ensureDefaultTemplates() {
   }
 }
 
+// Module-level singleton promise — runs ensureDefaultTemplates only once
+let defaultTemplatesPromise: Promise<void> | null = null;
+function getDefaultTemplates() {
+  if (!defaultTemplatesPromise) defaultTemplatesPromise = ensureDefaultTemplates();
+  return defaultTemplatesPromise;
+}
+
 // GET - Get all templates
 export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
-    // Auto-seed default templates on first load
-    await ensureDefaultTemplates();
+    // Auto-seed default templates on first load (singleton — runs only once)
+    await getDefaultTemplates();
 
     const { searchParams } = new URL(request.url);
     const category = searchParams.get('category');
@@ -97,24 +103,22 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ templates });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch templates' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/templates]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[GET /api/templates]', error });
   }
 }
 
 // POST - Create a new template
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { name, description, content, category, icon, variables, isDefault, projectId } = body;
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
 
-    if (!name || !content) {
-      return NextResponse.json({ error: 'Name and content are required' }, { status: 400 });
-    }
+  const body = await validateBody(request, CreateTemplateSchema);
+  if (body instanceof NextResponse) return body;
+
+  try {
+    const { name, description, content, category, icon, variables, isDefault, projectId } = body;
 
     const template = await db.template.create({
       data: {
@@ -140,11 +144,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ template }, { status: 201 });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to create template' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[POST /api/templates]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[POST /api/templates]', error });
   }
 }

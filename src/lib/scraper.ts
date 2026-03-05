@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import TurndownService from 'turndown';
 import { loggers } from './logger';
+import { stripDangerousTags } from './sanitization';
 
 const logger = loggers.ai; // Using AI logger as this is often an AI alternative/fallback
 
@@ -28,7 +29,8 @@ export function extractRichContent(html: string, url: string): ScraperResult | n
             codeBlockStyle: 'fenced',
         });
 
-        const markdown = turndownService.turndown(article.content || '');
+        const cleanHtml = stripDangerousTags(article.content || '');
+        const markdown = turndownService.turndown(cleanHtml);
 
         // Parse structured data (JSON-LD)
         const metadata = parseJsonLd(doc.window.document);

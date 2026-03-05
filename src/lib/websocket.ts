@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import { randomUUID } from 'node:crypto';
 import { db } from './db';
 import { WSEventType } from './ws-events';
+import { loggers } from './logger';
 
 type WSMessage = {
   type: string;
@@ -20,15 +21,23 @@ const globalForWebSocket = globalThis as unknown as {
   wsServer: WSServerWithClients | null | undefined;
 };
 
+// Per-socket heartbeat interval storage (WeakMap so GC can collect closed sockets)
+const heartbeatMap = new WeakMap<WebSocket, NodeJS.Timeout>();
+
+// Module-level shutdown flag — set to true before iterating clients during shutdown
+let isShuttingDown = false;
+
 /**
  * Initialize WebSocket server
  * Should be called when the HTTP server is created
  */
 export function initializeWebSocketServer(httpServer: Server): WSServerWithClients {
-  // Return existing instance if already initialized
+  // Dev hot reload: if a server already exists, shut it down cleanly before creating a new one
   if (globalForWebSocket.wsServer) {
-    console.log('[WebSocket] Server already initialized');
-    return globalForWebSocket.wsServer;
+    loggers.server.debug('[WebSocket] Existing server found — shutting down before reinitializing (hot reload)');
+    shutdownWebSocketServer().catch((err) => {
+      loggers.server.error('[WebSocket] Error during hot-reload shutdown:', err instanceof Error ? err : new Error(String(err)));
+    });
   }
 
   // Create WebSocket server in noServer mode so we can handle upgrade routing
@@ -53,22 +62,28 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
 
   // Add broadcast helper
   wss.broadcast = (type: string, data: any, excludeSocket?: WebSocket) => {
+    if (isShuttingDown) return;
+
     const message = JSON.stringify({ type, data });
 
     wss.clientMap.forEach((ws) => {
       if (ws !== excludeSocket && ws.readyState === WebSocket.OPEN) {
-        ws.send(message);
+        try {
+          ws.send(message);
+        } catch (err) {
+          loggers.server.warn('[WebSocket] Broadcast send failed for client', { error: (err as Error).message });
+        }
       }
     });
 
-    console.log(`[WebSocket] Broadcast: ${type} to ${wss.clientMap.size} clients`);
+    loggers.server.debug(`[WebSocket] Broadcast: ${type} to ${wss.clientMap.size} clients`);
   };
 
   // Handle new connections
   wss.on('connection', async (ws: WebSocket, req) => {
     // Reject new connections if server is shutting down
     if ((wss as any).isShuttingDown === true) {
-      console.log('[WebSocket] Rejecting new connection during shutdown');
+      loggers.server.debug('[WebSocket] Rejecting new connection during shutdown');
       ws.close(1001, 'Server is shutting down');
       return;
     }
@@ -85,7 +100,7 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
     // Store client in memory map
     wss.clientMap.set(socketId, ws);
 
-    console.log(`[WebSocket] Client connected: ${socketId} (${deviceName})`);
+    loggers.server.debug(`[WebSocket] Client connected: ${socketId} (${deviceName})`);
 
     // Attach metadata to ws instance
     (ws as any).socketId = socketId;
@@ -110,9 +125,9 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
       // Store DB record ID for cleanup
       (ws as any).dbDeviceId = device.id;
 
-      console.log(`[WebSocket] Device registered in DB: ${device.id}`);
+      loggers.server.debug(`[WebSocket] Device registered in DB: ${device.id}`);
     } catch (error) {
-      console.error('[WebSocket] Failed to register device in DB:', error);
+      loggers.server.error('[WebSocket] Failed to register device in DB:', error instanceof Error ? error : new Error(String(error)));
     }
 
     // Send connection confirmation to client
@@ -140,7 +155,7 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
         const message: WSMessage = JSON.parse(data.toString());
         handleMessage(ws, socketId, message, wss);
       } catch (error) {
-        console.error('[WebSocket] Error parsing message:', error);
+        loggers.server.error('[WebSocket] Error parsing message:', error instanceof Error ? error : new Error(String(error)));
       }
     });
 
@@ -157,15 +172,22 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
             data: { lastSeen: new Date().toISOString() }
           });
         } catch (error) {
-          console.error('[WebSocket] Failed to update lastSeen:', error);
+          loggers.server.error('[WebSocket] Failed to update lastSeen:', error instanceof Error ? error : new Error(String(error)));
         }
       }
     });
 
     // Handle disconnection
     ws.on('close', async () => {
+      // Clear any per-socket heartbeat interval on close
+      const socketHeartbeat = heartbeatMap.get(ws);
+      if (socketHeartbeat !== undefined) {
+        clearInterval(socketHeartbeat);
+        heartbeatMap.delete(ws);
+      }
+
       wss.clientMap.delete(socketId);
-      console.log(`[WebSocket] Client disconnected: ${socketId}`);
+      loggers.server.debug(`[WebSocket] Client disconnected: ${socketId}`);
 
       // Remove device from database
       const dbDeviceId = (ws as any).dbDeviceId;
@@ -174,9 +196,9 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
           await db.connectedDevice.delete({
             where: { id: dbDeviceId }
           });
-          console.log(`[WebSocket] Device removed from DB: ${dbDeviceId}`);
+          loggers.server.debug(`[WebSocket] Device removed from DB: ${dbDeviceId}`);
         } catch (error) {
-          console.error('[WebSocket] Failed to remove device from DB:', error);
+          loggers.server.error('[WebSocket] Failed to remove device from DB:', error instanceof Error ? error : new Error(String(error)));
         }
       }
 
@@ -189,7 +211,14 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
 
     // Handle errors
     ws.on('error', async (error) => {
-      console.error(`[WebSocket] Error for client ${socketId}:`, error);
+      // Clear any per-socket heartbeat interval on error
+      const socketHeartbeat = heartbeatMap.get(ws);
+      if (socketHeartbeat !== undefined) {
+        clearInterval(socketHeartbeat);
+        heartbeatMap.delete(ws);
+      }
+
+      loggers.server.error(`[WebSocket] Error for client ${socketId}:`, error instanceof Error ? error : new Error(String(error)));
       wss.clientMap.delete(socketId);
 
       // Clean up device from database on error
@@ -200,7 +229,7 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
             where: { id: dbDeviceId }
           });
         } catch (deleteError) {
-          console.error('[WebSocket] Failed to cleanup device from DB:', deleteError);
+          loggers.server.error('[WebSocket] Failed to cleanup device from DB:', deleteError instanceof Error ? deleteError : new Error(String(deleteError)));
         }
       }
     });
@@ -210,7 +239,7 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
   const heartbeatInterval = setInterval(async () => {
     for (const [socketId, ws] of wss.clientMap.entries()) {
       if ((ws as any).isAlive === false) {
-        console.log(`[WebSocket] Terminating dead connection: ${socketId}`);
+        loggers.server.debug(`[WebSocket] Terminating dead connection: ${socketId}`);
 
         // Clean up from database
         const dbDeviceId = (ws as any).dbDeviceId;
@@ -219,9 +248,9 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
             await db.connectedDevice.delete({
               where: { id: dbDeviceId }
             });
-            console.log(`[WebSocket] Cleaned up stale device from DB: ${dbDeviceId}`);
+            loggers.server.debug(`[WebSocket] Cleaned up stale device from DB: ${dbDeviceId}`);
           } catch (error) {
-            console.error('[WebSocket] Failed to cleanup stale device from DB:', error);
+            loggers.server.error('[WebSocket] Failed to cleanup stale device from DB:', error instanceof Error ? error : new Error(String(error)));
           }
         }
 
@@ -241,7 +270,7 @@ export function initializeWebSocketServer(httpServer: Server): WSServerWithClien
   });
 
   globalForWebSocket.wsServer = wss;
-  console.log('[WebSocket] Server initialized on path /ws');
+  loggers.server.debug('[WebSocket] Server initialized on path /ws');
 
   return wss;
 }
@@ -295,17 +324,23 @@ export function getConnectedDevices(): Array<{
  * If server is not initialized, this is a no-op (for development without WebSocket)
  */
 export function broadcast(type: string, data: any, excludeSocket?: WebSocket): void {
+  if (isShuttingDown) return;
+
   const server = globalForWebSocket.wsServer;
   if (server && server.clientMap) {
     const message = JSON.stringify({ type, data });
 
     server.clientMap.forEach((ws) => {
       if (ws !== excludeSocket && ws.readyState === WebSocket.OPEN) {
-        ws.send(message);
+        try {
+          ws.send(message);
+        } catch (err) {
+          loggers.server.warn('[WebSocket] Broadcast send failed for client', { error: (err as Error).message });
+        }
       }
     });
 
-    console.log(`[WebSocket] Broadcast: ${type} to ${server.clientMap.size} clients`);
+    loggers.server.debug(`[WebSocket] Broadcast: ${type} to ${server.clientMap.size} clients`);
   } else {
     // Silent no-op for development without WebSocket server
     // This allows the app to work in dev mode without crashing
@@ -346,7 +381,7 @@ async function handleMessage(ws: WebSocket, socketId: string, message: WSMessage
       break;
 
     default:
-      console.log(`[WebSocket] Unhandled message type: ${type}`);
+      loggers.server.debug(`[WebSocket] Unhandled message type: ${type}`);
   }
 }
 
@@ -399,7 +434,7 @@ async function handleSyncRequest(ws: WebSocket, data: { since?: string; lastSync
       response.links = links;
       response.hasMore = items.length === 100 || projects.length === 50 || links.length === 100;
 
-      console.log(`[WebSocket] Sync response: ${items.length} items, ${projects.length} projects, ${links.length} links since ${since}`);
+      loggers.server.debug(`[WebSocket] Sync response: ${items.length} items, ${projects.length} projects, ${links.length} links since ${since}`);
     } else {
       // First-time sync - get recent items and all active projects
       const items = await db.captureItem.findMany({
@@ -422,12 +457,12 @@ async function handleSyncRequest(ws: WebSocket, data: { since?: string; lastSync
       response.projects = projects;
       response.links = links;
 
-      console.log(`[WebSocket] Initial sync: ${items.length} items, ${projects.length} projects, ${links.length} links`);
+      loggers.server.debug(`[WebSocket] Initial sync: ${items.length} items, ${projects.length} projects, ${links.length} links`);
     }
 
     sendToClient(ws, { type: 'sync:response', data: response });
   } catch (error) {
-    console.error('[WebSocket] Error handling sync request:', error);
+    loggers.server.error('[WebSocket] Error handling sync request:', error instanceof Error ? error : new Error(String(error)));
     sendToClient(ws, {
       type: 'sync:response',
       data: {
@@ -475,15 +510,16 @@ function parseDeviceType(userAgent: string): string {
 export async function shutdownWebSocketServer(): Promise<void> {
   const server = globalForWebSocket.wsServer;
   if (!server) {
-    console.log('[WebSocket] No server to shutdown');
+    loggers.server.debug('[WebSocket] No server to shutdown');
     return;
   }
 
-  console.log(`[WebSocket] Starting graceful shutdown (${server.clientMap.size} clients)`);
+  loggers.server.debug(`[WebSocket] Starting graceful shutdown (${server.clientMap.size} clients)`);
 
-  // Step 1: Set shutdown flag to prevent new connections
+  // Step 1: Set shutdown flags to prevent new connections and broadcasts
+  isShuttingDown = true;
   (server as any).isShuttingDown = true;
-  console.log('[WebSocket] Rejecting new connections during shutdown');
+  loggers.server.debug('[WebSocket] Rejecting new connections during shutdown');
 
   // Step 2: Notify all connected clients of impending shutdown
   const shutdownMessage = JSON.stringify({
@@ -500,12 +536,12 @@ export async function shutdownWebSocketServer(): Promise<void> {
       try {
         ws.send(shutdownMessage);
       } catch (err) {
-        console.error('[WebSocket] Error sending shutdown notification:', err);
+        loggers.server.error('[WebSocket] Error sending shutdown notification:', err instanceof Error ? err : new Error(String(err)));
       }
     }
   });
 
-  console.log(`[WebSocket] Notified ${server.clientMap.size} clients of shutdown`);
+  loggers.server.debug(`[WebSocket] Notified ${server.clientMap.size} clients of shutdown`);
 
   // Step 3: Clean up all ConnectedDevice records from database
   const deviceIdsToDelete: string[] = [];
@@ -524,9 +560,9 @@ export async function shutdownWebSocketServer(): Promise<void> {
           id: { in: deviceIdsToDelete }
         }
       });
-      console.log(`[WebSocket] Cleaned up ${deviceIdsToDelete.length} device records from database`);
+      loggers.server.debug(`[WebSocket] Cleaned up ${deviceIdsToDelete.length} device records from database`);
     } catch (error) {
-      console.error('[WebSocket] Error cleaning up device records:', error);
+      loggers.server.error('[WebSocket] Error cleaning up device records:', error instanceof Error ? error : new Error(String(error)));
     }
   }
 
@@ -545,11 +581,11 @@ export async function shutdownWebSocketServer(): Promise<void> {
         server.clientMap.delete(socketId);
       }
     } catch (err) {
-      console.error(`[WebSocket] Error closing connection ${socketId}:`, err);
+      loggers.server.error(`[WebSocket] Error closing connection ${socketId}:`, err instanceof Error ? err : new Error(String(err)));
     }
   });
 
-  console.log(`[WebSocket] Closed ${closedCount} WebSocket connections`);
+  loggers.server.debug(`[WebSocket] Closed ${closedCount} WebSocket connections`);
 
   // Step 6: Clear the client map
   server.clientMap.clear();
@@ -558,11 +594,12 @@ export async function shutdownWebSocketServer(): Promise<void> {
   return new Promise<void>((resolve) => {
     server.close((err) => {
       if (err) {
-        console.error('[WebSocket] Error closing WebSocket server:', err);
+        loggers.server.error('[WebSocket] Error closing WebSocket server:', err instanceof Error ? err : new Error(String(err)));
       } else {
-        console.log('[WebSocket] WebSocket server closed successfully');
+        loggers.server.debug('[WebSocket] WebSocket server closed successfully');
       }
       globalForWebSocket.wsServer = null;
+      isShuttingDown = false; // Reset so a new server can be initialized
       resolve();
     });
   });

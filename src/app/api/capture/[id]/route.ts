@@ -6,12 +6,16 @@ import type { CaptureItemUpdateInput } from '@/lib/prisma-types';
 import { apiError, classifyError } from '@/lib/api-route-handler';
 import { withConflictResolution, conflictResolutionResponse, checkConcurrentUpdate, updateWithConflictCheck } from '@/lib/api-middleware';
 import { conflictTracker } from '@/lib/conflict-resolution';
+import { validateRequest } from '@/lib/api-security';
 
 // GET - Get single capture item
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status ?? 500 });
+
   try {
     const { id } = await params;
     const item = await db.captureItem.findUnique({
@@ -28,12 +32,8 @@ export async function GET(
       metadata: safeParseJSON(item.metadata),
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch item' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/capture/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    return apiError(message, status, { details: process.env.NODE_ENV === 'production' ? undefined : details, logPrefix: '[GET /api/capture/[id]]', error });
   }
 }
 
@@ -42,6 +42,9 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status ?? 500 });
+
   try {
     const { id } = await params;
     const body = await request.json();
@@ -145,10 +148,6 @@ export async function PUT(
 
       if (clientDate < serverDate) {
         // Client has stale data - return current server version
-        console.warn(`[ConflictResolution] Stale update for item ${id}:`, {
-          clientTimestamp,
-          serverTimestamp: existingItem.updatedAt,
-        });
 
         // Track conflict
         conflictTracker.recordConflict('item', 'remote');
@@ -173,10 +172,6 @@ export async function PUT(
 
       // Client has newer or same version - proceed with update
       if (clientDate > serverDate) {
-        console.warn(`[ConflictResolution] Client has newer version for item ${id}:`, {
-          clientTimestamp,
-          serverTimestamp: existingItem.updatedAt,
-        });
         conflictTracker.recordConflict('item', 'local');
       }
     }
@@ -214,8 +209,8 @@ export async function PUT(
       updatedAt,
       pinned: updateData.pinned !== undefined ? updateData.pinned : !!existingItem.pinned,
       reminderSent: !!existingItem.reminderSent,
-      tags: safeParseTags(updateData.tags ?? existingItem.tags),
-      metadata: safeParseJSON(updateData.metadata ?? existingItem.metadata),
+      tags: safeParseTags((updateData.tags as string | null | undefined) ?? existingItem.tags),
+      metadata: safeParseJSON((updateData.metadata as string | null | undefined) ?? existingItem.metadata),
     };
 
     // Broadcast update to all connected clients
@@ -230,12 +225,8 @@ export async function PUT(
 
     return NextResponse.json(mergedItem);
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to update item' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[PUT /api/capture/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    return apiError(message, status, { details: process.env.NODE_ENV === 'production' ? undefined : details, logPrefix: '[PUT /api/capture/[id]]', error });
   }
 }
 
@@ -244,6 +235,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status ?? 500 });
+
   try {
     const { id } = await params;
 
@@ -274,11 +268,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to delete item' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[DELETE /api/capture/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    return apiError(message, status, { details: process.env.NODE_ENV === 'production' ? undefined : details, logPrefix: '[DELETE /api/capture/[id]]', error });
   }
 }

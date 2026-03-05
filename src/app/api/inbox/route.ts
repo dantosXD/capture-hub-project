@@ -3,9 +3,13 @@ import { db } from '@/lib/db';
 import { safeParseTags, safeParseJSON } from '@/lib/parse-utils';
 import type { CaptureItemWhereInput, CaptureItemOrderByInput } from '@/lib/prisma-types';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 // GET - Get inbox items with filters
 export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get('type');
@@ -13,7 +17,8 @@ export async function GET(request: NextRequest) {
     const priority = searchParams.get('priority');
     const assignedTo = searchParams.get('assignedTo');
     const tag = searchParams.get('tag');
-    const limit = parseInt(searchParams.get('limit') || '50');
+    const limitParam = searchParams.get('limit');
+    const limit = Math.min(parseInt(limitParam || '50'), 100);
     const offset = parseInt(searchParams.get('offset') || '0');
     const sortBy = searchParams.get('sort') || searchParams.get('sortBy') || 'newest';
 
@@ -50,21 +55,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ items: parsedItems, total });
     }
 
-    // Tag filter requires JS filtering (SQLite limitation with JSON fields)
-    // Only select needed fields for tag filtering to reduce memory
+    // Tag filter: use DB pre-filter via contains to limit result set, then exact-match in JS
+    const tagWhere: CaptureItemWhereInput = { ...where, tags: { contains: tag } };
+
     const items = await db.captureItem.findMany({
-      where,
+      where: tagWhere,
       orderBy,
     });
 
-    // Parse and filter
+    // Parse and exact-match filter
     let parsedItems = items.map(item => ({
       ...item,
       tags: safeParseTags(item.tags),
       metadata: safeParseJSON(item.metadata),
     }));
 
-    // Filter by tag
+    // Filter by tag (exact match after parsing JSON array)
     parsedItems = parsedItems.filter(item =>
       item.tags.some((t: string) => t.toLowerCase() === tag.toLowerCase())
     );
@@ -74,11 +80,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ items: parsedItems, total });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch inbox items' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/inbox]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[GET /api/inbox]', error });
   }
 }

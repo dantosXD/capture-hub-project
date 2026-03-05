@@ -19,23 +19,7 @@ import { OCRTool } from './CaptureModules/OCRTool';
 import { ScreenshotCapture } from './CaptureModules/ScreenshotCapture';
 import { WebCapture } from './CaptureModules/WebCapture';
 import { getAriaExpanded, getAriaHasPopup } from '@/lib/accessibility';
-
-// Hook to detect mobile viewport
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  return isMobile;
-}
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface CaptureModule {
   id: string;

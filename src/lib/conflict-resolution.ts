@@ -4,10 +4,11 @@
  */
 
 import type { CaptureItem, Project, ItemLink } from '@prisma/client';
+import { loggers } from './logger';
 
 export interface ConflictResolutionOptions {
-  localTimestamp: string;
-  remoteTimestamp: string;
+  localTimestamp: string | Date;
+  remoteTimestamp: string | Date;
   localData: any;
   remoteData: any;
   entityType: 'item' | 'project' | 'link';
@@ -17,13 +18,13 @@ export interface ConflictResolutionResult<T> {
   winner: 'local' | 'remote';
   data: T;
   conflictDetected: boolean;
-  timestamp: string;
+  timestamp: string | Date;
 }
 
 /**
  * Compare two ISO timestamps and determine which is more recent
  */
-export function compareTimestamps(local: string, remote: string): number {
+export function compareTimestamps(local: string | Date, remote: string | Date): number {
   const localDate = new Date(local);
   const remoteDate = new Date(remote);
 
@@ -36,7 +37,7 @@ export function compareTimestamps(local: string, remote: string): number {
  * Resolve conflict using last-write-wins strategy
  * The version with the latest updatedAt timestamp wins
  */
-export function resolveConflict<T extends { updatedAt: string }>(
+export function resolveConflict<T extends { updatedAt: string | Date }>(
   options: ConflictResolutionOptions
 ): ConflictResolutionResult<T> {
   const { localTimestamp, remoteTimestamp, localData, remoteData } = options;
@@ -55,7 +56,7 @@ export function resolveConflict<T extends { updatedAt: string }>(
 
   // Remote is newer - use remote data
   if (comparison < 0) {
-    console.warn(`[ConflictResolution] Remote update is newer (${remoteTimestamp} vs ${localTimestamp})`);
+    loggers.server.debug('Conflict resolved', { strategy: 'last-write-wins', winner: 'remote' });
 
     return {
       winner: 'remote',
@@ -66,7 +67,7 @@ export function resolveConflict<T extends { updatedAt: string }>(
   }
 
   // Local is newer - keep local data
-  console.warn(`[ConflictResolution] Local update is newer (${localTimestamp} vs ${remoteTimestamp})`);
+  loggers.server.debug('Conflict resolved', { strategy: 'last-write-wins', winner: 'local' });
 
   return {
     winner: 'local',
@@ -151,15 +152,11 @@ export function resolveLinkConflict(
 function logConflict(
   entityType: string,
   entityId: string,
-  localTimestamp: string,
-  remoteTimestamp: string,
+  localTimestamp: string | Date,
+  remoteTimestamp: string | Date,
   winner: 'local' | 'remote'
 ) {
-  console.warn(`[ConflictResolution] Conflict detected for ${entityType} ${entityId}:`, {
-    localTimestamp,
-    remoteTimestamp,
-    winner,
-  });
+  loggers.server.debug('Conflict detected', { entityId, strategy: 'last-write-wins' });
 
   // Send to analytics/logging service if needed
   if (typeof window !== 'undefined') {
@@ -186,7 +183,7 @@ function logConflict(
       }
       sessionStorage.setItem('conflict_logs', JSON.stringify(logs));
     } catch (error) {
-      console.warn('[ConflictResolution] Failed to store conflict log:', error);
+      loggers.server.warn('[ConflictResolution] Failed to store conflict log', { error: String(error) });
     }
   }
 }

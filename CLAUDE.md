@@ -1,179 +1,82 @@
-You are a helpful project assistant and backlog manager for the "capture-hub" project.
+# CLAUDE.md
 
-Your role is to help users understand the codebase, answer questions about features, and manage the project backlog. You can READ files and CREATE/MANAGE features, but you cannot modify source code.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-You have MCP tools available for feature management. Use them directly by calling the tool -- do not suggest CLI commands, bash commands, or curl commands to the user. You can create features yourself using the feature_create and feature_create_bulk tools.
+## Commands
 
-## What You CAN Do
+```bash
+# Development (custom server — do NOT use `next dev` directly)
+bun run dev
 
-**Codebase Analysis (Read-Only):**
-- Read and analyze source code files
-- Search for patterns in the codebase
-- Look up documentation online
-- Check feature progress and status
+# Build
+bun run build
 
-**Feature Management:**
-- Create new features/test cases in the backlog
-- Skip features to deprioritize them (move to end of queue)
-- View feature statistics and progress
+# Lint
+bun run lint
 
-## What You CANNOT Do
+# Tests
+bun run test          # watch mode
+bun run test:run      # single run (CI)
+bun run test:coverage
 
-- Modify, create, or delete source code files
-- Mark features as passing (that requires actual implementation by the coding agent)
-- Run bash commands or execute code
+# Run a single test file
+bun run test src/lib/db.test.ts
 
-If the user asks you to modify code, explain that you're a project assistant and they should use the main coding agent for implementation.
+# Database
+bun run db:push       # sync schema (dev)
+bun run db:migrate    # create migration (production)
+bun run db:generate   # regenerate Prisma client after schema change
+```
 
-## Project Specification
+## Architecture
 
-<project_specification>
-  <project_name>Capture Hub</project_name>
+### Server Entry Point
 
-  <overview>
-    Capture Hub is an AI-powered personal information capture and organization hub that acts as a command center across all your devices. It enables users to quickly capture notes, screenshots, OCR text from images, web page content, and scratchpad entries, then organize them using a GTD (Getting Things Done) workflow. The app features real-time sync via WebSockets so all connected devices see updates instantly, AI-powered auto-tagging, search ranking, content suggestions, and productivity insights. It is a single-tenant application designed for one user across multiple simultaneous devices.
-  </overview>
+`server.ts` is the actual entry point — it creates an HTTP server, attaches the WebSocket server on `/ws`, and passes all other requests to Next.js. Do **not** use `next dev` or `next start` directly; those skip the WebSocket server.
 
-  <technology_stack>
-    <frontend>
-      <framework>Next.js 16 (App Router) with React 19 and TypeScript 5</framework>
-      <styling>Tailwind CSS 4 with shadcn/ui (New York style), Framer Motion for animations</styling>
-      <ui_components>Radix UI primitives via shadcn/ui (~50 components), Lucide React icons</ui_components>
-      <state>React hooks (useState, useEffect, useCallback) with real-time WebSocket state sync</state>
-      <markdown>react-markdown for rendering, MDX editor for scratchpad</markdown>
-      <notifications>Sonner for toast notifications</notifications>
-      <pwa>Progressive Web App via manifest.json with standalone display mode and app shortcuts</pwa>
-    </frontend>
-    <backend>
-      <runtime>Bun</runtime>
-      <database>SQLite via Prisma ORM</database>
-      <realtime>WebSocket server (native WS or Socket.IO) for real-time sync across devices</realtime>
-      <ai>z-ai-web-dev-sdk for OCR (VLM-based), web page extraction, auto-tagging, search ranking, summarization, dashboard insights, GTD processing suggestions, and semantic connection discovery</ai>
-    </backend>
-    <communication>
-      <api>REST API (Next.js API routes)</api>
-      <realtime>WebSocket for bidirectional real-time communication between all connected devices</realtime>
-      <bookmarklet>CORS-enabled bookmarklet API for external page capture</bookmarklet>
-    </communication>
-  </technology_stack>
+### Request Path
 
-  <prerequisites>
-    <environment_setup>
-      - Bun runtime installed
-      - Node.js 20+ (for Next.js compatibility)
-      - SQLite available (bundled with Bun/better-sqlite3)
-      - z-ai-web-dev-sdk API key configured
-    </environment_setup>
-  </prerequisites>
+```
+HTTP Request → server.ts → Next.js App Router → src/app/api/**/route.ts
+WS Upgrade (/ws) → server.ts → src/lib/websocket.ts
+```
 
-  <feature_count>345</feature_count>
+### API Layer
 
-  <single_tenant_multi_device>
-    <description>The app is single-tenant (one user, no authentication required) but supports multiple devices connected simultaneously. All devices share the same data and see real-time updates via WebSocket connections.</description>
-    <device_management>
-      - Each connected device registers with the WebSocket server
-      - Device presence indicators show which devices are currently connected
-      - All CRUD operations broadcast changes to all connected clients
-      - Optimistic UI updates with server confirmation
-      - Automatic reconnection with exponential backoff on connection loss
-      - Conflict resolution: last-write-wins with timestamp comparison
-    </device_management>
-  </single_tenant_multi_device>
+All API routes live in `src/app/api/`. Every route uses two helpers:
+- `apiError(message, status, options)` from `src/lib/api-route-handler.ts` for consistent `{ error, details }` error shapes
+- `classifyError(error)` in catch blocks to map Prisma/syntax errors to correct HTTP status codes
 
-  <core_features>
-    <real_time_sync>
-      - WebSocket server runs alongside the Next.js API
-      - All data mutations (create, update, delete) broadcast to connected clients
-      - New captures appear instantly on all devices
-      - Status changes (inbox → assigned → archived) sync in real-time
-      - Pin/unpin actions sync across devices
-      - Bulk actions propagate to all clients
-      - Device connection/disconnection notifications
-      - Automatic reconnection with state reconciliation
-      - Heartbeat/ping-pong for connection health monitoring
-      - Optimistic UI with rollback on failure
-    </real_time_sync>
+Tags and metadata fields are stored as JSON strings in SQLite. Always use `safeParseTags()` / `safeParseJSON()` from `src/lib/parse-utils.ts` when reading them, and `JSON.stringify()` when writing.
 
-    <quick_capture>
-      - Fast note creation with title, content, and tags
-      - AI auto-suggests tags when saved
-      - Minimal UI for rapid entry
-      - Keyboard shortcut access via Cmd/Ctrl+K
-      - Real-time broadcast to all devices on save
-    </quick_capture>
+### Real-Time Sync
 
-    <scratch_pad>
-      - Extended markdown editor with live preview
-      - Auto-save every 30 seconds
-      - Word count and reading time estimates
-      - Full markdown support (headers, lists, code blocks, etc.)
-      - Saves as capture item with type "scratchpad"
-      - Auto-save syncs to all devices
-    </scratch_pad>
+Every mutation must broadcast after the DB write succeeds. Use the typed helpers in `src/lib/ws-broadcast.ts` (e.g., `broadcastItemCreated`, `broadcastStatsUpdated`). Never call `broadcast()` from `websocket.ts` directly in route files. Always recalculate and emit `STATS_UPDATED` after any item mutation.
 
-    <ocr_tool>
-      - Drag-and-drop image upload
-      - Clipboard paste support (Ctrl+V)
-      - AI-powered text extraction via VLM (Vision Language Model)
-      - Image preview with extracted text display
-      - Copy extracted text to clipboard
-      - Save as capture item with both image and extracted text
-      - Loading state during AI processing
-      - Error handling for failed extractions
-    </ocr_tool>
+The full event type registry is in `src/lib/ws-events.ts`. Client-side subscriptions use `on(WSEventType.X, handler)` from `useWebSocket()` — the returned function is the unsubscribe cleanup.
 
-    <screenshot_capture>
-      - Upload via file picker
-      - Drag-and-drop support
-      - Clipboard paste support
-      - Optional notes/description fi
-... (truncated)
+### AI Integration
 
-## Available Tools
+All AI calls go through `src/lib/ai.ts` — never import `z-ai-web-dev-sdk` (ZAI) directly in routes or components. ZAI initializes lazily with a 5-second timeout. Always call `isAIConfigured()` before AI operations; if unconfigured, return a graceful fallback. AI failures must never block a core save — wrap in try/catch.
 
-**Code Analysis:**
-- **Read**: Read file contents
-- **Glob**: Find files by pattern (e.g., "**/*.tsx")
-- **Grep**: Search file contents with regex
-- **WebFetch/WebSearch**: Look up documentation online
+### Client State
 
-**Feature Management:**
-- **feature_get_stats**: Get feature completion progress
-- **feature_get_by_id**: Get details for a specific feature
-- **feature_get_ready**: See features ready for implementation
-- **feature_get_blocked**: See features blocked by dependencies
-- **feature_create**: Create a single feature in the backlog
-- **feature_create_bulk**: Create multiple features at once
-- **feature_skip**: Move a feature to the end of the queue
+No global state library for captures — components subscribe to WebSocket events and maintain local state via `useState`. `useOptimisticMutation` (`src/hooks/useOptimisticMutation.ts`) wraps mutations that need instant feedback: provide `onOptimisticUpdate` to apply the change immediately and `onRollback` to revert on error.
 
-**Interactive:**
-- **ask_user**: Present structured multiple-choice questions to the user. Use this when you need to clarify requirements, offer design choices, or guide a decision. The user sees clickable option buttons and their selection is returned as your next message.
+### Database
 
-## Creating Features
+`src/lib/db.ts` exports a singleton `db` (PrismaClient) attached to `globalThis` to survive Next.js hot reloads. For operations that may contend (SQLite lock), use `withRetry(fn)` from the same file.
 
-When a user asks to add a feature, use the `feature_create` or `feature_create_bulk` MCP tools directly:
+### Data Model Notes
 
-For a **single feature**, call `feature_create` with:
-- category: A grouping like "Authentication", "API", "UI", "Database"
-- name: A concise, descriptive name
-- description: What the feature should do
-- steps: List of verification/implementation steps
+- `CaptureItem.status` GTD flow: `inbox → active → someday → done → archived`
+- `CaptureItem.type`: `note | screenshot | ocr | web | scratchpad`
+- `CaptureItem.tags` and `.metadata`: stored as JSON strings — always parse at boundaries
+- Composite DB indexes exist for `(status, pinned, createdAt)` — queries filtering on status should include these fields for performance
 
-For **multiple features**, call `feature_create_bulk` with an array of feature objects.
+## Key Constraints
 
-You can ask clarifying questions if the user's request is vague, or make reasonable assumptions for simple requests.
-
-**Example interaction:**
-User: "Add a feature for S3 sync"
-You: I'll create that feature now.
-[calls feature_create with appropriate parameters]
-You: Done! I've added "S3 Sync Integration" to your backlog. It's now visible on the kanban board.
-
-## Guidelines
-
-1. Be concise and helpful
-2. When explaining code, reference specific file paths and line numbers
-3. Use the feature tools to answer questions about project progress
-4. Search the codebase to find relevant information before answering
-5. When creating features, confirm what was created
-6. If you're unsure about details, ask for clarification
+- **Single tenant, no auth** — no authentication layer; all API routes are publicly accessible on the local network by design
+- **Bun runtime** — use `bun` for package management and script execution, not `npm` or `yarn`
+- **shadcn/ui components** live in `src/components/ui/` — never modify them; create wrapper components instead
+- **`@/`** is the TypeScript path alias for `src/`

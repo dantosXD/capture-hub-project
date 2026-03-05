@@ -47,9 +47,10 @@ export function useAnimatedNumber(
       return;
     }
 
-    // Cancel any existing animation
+    // Cancel any existing animation before starting a new one
     if (animationFrameRef.current !== null) {
       cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
 
     // Start animation
@@ -78,6 +79,7 @@ export function useAnimatedNumber(
     return () => {
       if (animationFrameRef.current !== null) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     };
   }, [value, duration, ease]);

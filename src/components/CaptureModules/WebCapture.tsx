@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +26,9 @@ export function WebCapture({ onComplete }: WebCaptureProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Abort any in-flight request on unmount
+  useEffect(() => () => { abortControllerRef.current?.abort(); }, []);
 
   const handleAddTag = () => {
     if (tagInput.trim() && !tags.includes(tagInput.trim())) {

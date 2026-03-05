@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { enhanceSearch } from '@/lib/ai';
-import { safeParseTags, safeParseJSON } from '@/lib/parse-utils';
+import { safeParseTags, safeParseJSON, sanitizeSearchQuery } from '@/lib/parse-utils';
 import type { CaptureItemWhereInput, CaptureItem } from '@/lib/prisma-types';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 /**
  * Escape special characters for SQL LIKE queries with ESCAPE clause.
@@ -23,28 +24,24 @@ function hasSqlLikeSpecialChars(query: string): boolean {
   return /[%_\\]/.test(query);
 }
 
-/**
- * Sanitize search query: trim, truncate, return null for empty
- */
-function sanitizeSearchQuery(query: string | null | undefined, maxLength = 1000): string | null {
-  if (!query) return null;
-  const trimmed = query.trim();
-  if (!trimmed) return null;
-  return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
-}
-
 // GET - Search across all items
 export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) {
+    return NextResponse.json({ error: security.error }, { status: security.status });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const query = searchParams.get('q');
     const type = searchParams.get('type');
     const status = searchParams.get('status');
     const limit = parseInt(searchParams.get('limit') || '20');
-    const aiEnhanced = searchParams.get('aiEnhanced') === 'true' || searchParams.get('ai') === 'true';
+    // Single canonical param: 'aiEnhanced' — 'ai' alias removed
+    const aiEnhanced = searchParams.get('aiEnhanced') === 'true';
     const useAI = aiEnhanced;
 
-    // Sanitize query: trim whitespace, truncate if too long
+    // Sanitize query using the shared utility from parse-utils
     const sanitizedQuery = sanitizeSearchQuery(query, 1000);
 
     // Return empty results for empty or whitespace-only queries
@@ -123,8 +120,8 @@ export async function GET(request: NextRequest) {
     if (useAI && parsedItems.length > 0) {
       try {
         parsedItems = await enhanceSearch(sanitizedQuery, parsedItems);
-      } catch (e) {
-        console.error('AI search enhancement failed, using basic results');
+      } catch {
+        // AI enhancement failed — continue with basic results
       }
     }
 
@@ -133,11 +130,16 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ items, results: items, total, query: sanitizedQuery });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Search failed' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/search]',
-      error,
-    });
+    const { message, status } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : classifyError(error).details;
+    return apiError(
+      message === 'Internal server error' ? 'Search failed' : message,
+      status,
+      {
+        details: safeDetails,
+        logPrefix: '[GET /api/search]',
+        error,
+      }
+    );
   }
 }

@@ -4,6 +4,7 @@
 
 import { render } from '@testing-library/react';
 import { ReactElement } from 'react';
+import { vi } from 'vitest';
 
 // Custom render function that wraps with necessary providers
 export function renderWithProviders(ui: ReactElement) {

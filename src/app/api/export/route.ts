@@ -3,9 +3,16 @@ import { db } from '@/lib/db';
 import { safeParseTags, safeParseJSON } from '@/lib/parse-utils';
 import type { CaptureItemWhereInput } from '@/lib/prisma-types';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
+import { CaptureItemQuerySchema } from '@/lib/validation-schemas';
 
 // GET - Export all data (supports filtered subsets via query params)
 export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) {
+    return NextResponse.json({ error: security.error }, { status: security.status });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const format = searchParams.get('format') || 'json';
@@ -18,10 +25,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // --- Filter parameters (Feature #444: Export filtered subset) ---
-    const status = searchParams.get('status');
-    const type = searchParams.get('type');
-    const priority = searchParams.get('priority');
+    // --- Filter parameters validated via CaptureItemQuerySchema ---
+    // Build params object for schema validation, excluding 'all' (export-specific passthrough meaning no filter)
+    const rawParams: Record<string, string> = {};
+    for (const [key, value] of searchParams.entries()) {
+      // Skip 'all' for status — it means no filter, handled below
+      if (key === 'status' && value === 'all') continue;
+      rawParams[key] = value;
+    }
+
+    // Use CaptureItemQuerySchema for enum validation (status, type, priority)
+    const queryParsed = CaptureItemQuerySchema.safeParse(rawParams);
+    if (!queryParsed.success) {
+      const errors = queryParsed.error.issues.map(e => ({
+        path: e.path.join('.'),
+        message: e.message,
+      }));
+      return NextResponse.json({ error: 'Invalid query parameters', details: errors }, { status: 400 });
+    }
+
+    // status is undefined when 'all' was passed (passthrough = no filter)
+    const { status, type, priority } = queryParsed.data;
+
+    // Non-enum params read directly from searchParams (safe string values)
     const assignedTo = searchParams.get('assignedTo');
     const tag = searchParams.get('tag');
     const pinned = searchParams.get('pinned');
@@ -30,7 +56,7 @@ export async function GET(request: NextRequest) {
 
     // Build where clause with all supported filters
     const where: CaptureItemWhereInput = {};
-    if (status && status !== 'all') {
+    if (status) {
       where.status = status;
     }
     if (type) {
@@ -57,10 +83,14 @@ export async function GET(request: NextRequest) {
         { content: { contains: search } },
       ];
     }
+    // Tag pre-filter at DB level to limit result set
+    if (tag) {
+      where.tags = { contains: tag };
+    }
 
     // Track which filters were applied for export metadata
     const appliedFilters: Record<string, string> = {};
-    if (status && status !== 'all') appliedFilters.status = status;
+    if (status) appliedFilters.status = status;
     if (type) appliedFilters.type = type;
     if (priority) appliedFilters.priority = priority;
     if (assignedTo) appliedFilters.assignedTo = assignedTo;
@@ -70,36 +100,28 @@ export async function GET(request: NextRequest) {
     if (search) appliedFilters.search = search;
     const isFiltered = Object.keys(appliedFilters).length > 0;
 
-    // Set a timeout for database queries
-    const QUERY_TIMEOUT = 10000; // 10 seconds
-
-    // Fetch all data in parallel with timeout
-    const [items, projects, templates, links] = await Promise.race([
-      Promise.all([
-        // Get all items (with filters applied)
-        db.captureItem.findMany({
-          where,
-          orderBy: { createdAt: 'desc' },
-        }),
-        // Get all projects
-        db.project.findMany({
-          include: {
-            _count: { select: { items: true } },
-          },
-        }),
-        // Get all templates
-        db.template.findMany({
-          orderBy: { createdAt: 'desc' },
-        }),
-        // Get all links
-        db.itemLink.findMany({
-          orderBy: { createdAt: 'desc' },
-        }),
-      ]),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Database query timeout')), QUERY_TIMEOUT)
-      ),
-    ]) as [any[], any[], any[], any[]];
+    // Fetch all data in parallel — no artificial Promise.race timeout
+    const [items, projects, templates, links] = await Promise.all([
+      // Get all items (with filters applied)
+      db.captureItem.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+      }),
+      // Get all projects
+      db.project.findMany({
+        include: {
+          _count: { select: { items: true } },
+        },
+      }),
+      // Get all templates
+      db.template.findMany({
+        orderBy: { createdAt: 'desc' },
+      }),
+      // Get all links
+      db.itemLink.findMany({
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
     // Parse JSON fields safely
     let parsedItems = items.map(item => ({
@@ -108,7 +130,7 @@ export async function GET(request: NextRequest) {
       metadata: safeParseJSON(item.metadata),
     }));
 
-    // Tag filter requires JS filtering (SQLite limitation with JSON fields)
+    // Tag exact-match JS filter after DB pre-filter (validates exact match)
     if (tag) {
       parsedItems = parsedItems.filter(item =>
         item.tags.some((t: string) => t.toLowerCase() === tag.toLowerCase())
@@ -117,11 +139,11 @@ export async function GET(request: NextRequest) {
 
     if (format === 'markdown' || format === 'md') {
       // Helper: format date nicely
-      const formatDate = (dateStr: string | null | undefined): string => {
+      const formatDate = (dateStr: string | Date | null | undefined): string => {
         if (!dateStr || dateStr === 'now()') return 'N/A';
         try {
-          const d = new Date(dateStr);
-          if (isNaN(d.getTime())) return dateStr;
+          const d = dateStr instanceof Date ? dateStr : new Date(dateStr);
+          if (isNaN(d.getTime())) return String(dateStr);
           return d.toLocaleDateString('en-US', {
             weekday: 'short',
             year: 'numeric',
@@ -131,7 +153,7 @@ export async function GET(request: NextRequest) {
             minute: '2-digit',
           });
         } catch {
-          return dateStr;
+          return String(dateStr);
         }
       };
 
@@ -147,9 +169,9 @@ export async function GET(request: NextRequest) {
       // Group items by type
       const itemsByType: Record<string, typeof parsedItems> = {};
       for (const item of parsedItems) {
-        const type = item.type || 'other';
-        if (!itemsByType[type]) itemsByType[type] = [];
-        itemsByType[type].push(item);
+        const itemType = item.type || 'other';
+        if (!itemsByType[itemType]) itemsByType[itemType] = [];
+        itemsByType[itemType].push(item);
       }
 
       // Determine which sections exist for TOC
@@ -201,8 +223,8 @@ export async function GET(request: NextRequest) {
       if (hasProjects) {
         markdown += `- [Projects](#projects)\n`;
       }
-      for (const type of typeKeys) {
-        const info = typeLabels[type] || { label: type.charAt(0).toUpperCase() + type.slice(1), icon: '📄' };
+      for (const t of typeKeys) {
+        const info = typeLabels[t] || { label: t.charAt(0).toUpperCase() + t.slice(1), icon: '📄' };
         markdown += `- [${info.icon} ${info.label}](#${info.label.toLowerCase().replace(/\s+/g, '-')})\n`;
       }
       if (hasTemplates) {
@@ -236,9 +258,9 @@ export async function GET(request: NextRequest) {
       }
 
       // Items grouped by type
-      for (const type of typeKeys) {
-        const typeItems = itemsByType[type];
-        const info = typeLabels[type] || { label: type.charAt(0).toUpperCase() + type.slice(1), icon: '📄' };
+      for (const t of typeKeys) {
+        const typeItems = itemsByType[t];
+        const info = typeLabels[t] || { label: t.charAt(0).toUpperCase() + t.slice(1), icon: '📄' };
         markdown += `## ${info.icon} ${info.label}\n\n`;
         markdown += `*${typeItems.length} item${typeItems.length !== 1 ? 's' : ''}*\n\n`;
 
@@ -251,7 +273,7 @@ export async function GET(request: NextRequest) {
           markdown += `| Status | ${item.status} |\n`;
           markdown += `| Priority | ${item.priority} |\n`;
           if (item.tags.length > 0) {
-            markdown += `| Tags | ${item.tags.map(t => `\`${t}\``).join(', ')} |\n`;
+            markdown += `| Tags | ${item.tags.map((tg: string) => `\`${tg}\``).join(', ')} |\n`;
           }
           if (item.assignedTo) {
             markdown += `| Assigned To | ${item.assignedTo} |\n`;
@@ -332,15 +354,12 @@ export async function GET(request: NextRequest) {
 
     if (format === 'csv') {
       // Helper: escape a value for CSV (RFC 4180 compliant)
-      // Handles commas, double quotes, newlines, and other special characters
       const csvEscape = (value: string | number | boolean | null | undefined): string => {
         if (value === null || value === undefined) return '""';
         const str = String(value);
-        // Always wrap in double quotes; escape internal double quotes by doubling them
         return `"${str.replace(/"/g, '""')}"`;
       };
 
-      // Feature #294: Include ALL item fields as columns
       const headers = [
         'ID',
         'Title',
@@ -387,14 +406,13 @@ export async function GET(request: NextRequest) {
           item.projectId || '',
           item.processedAt || '',
           item.processedBy || '',
-          item.createdAt || '',
-          item.updatedAt || '',
+          (item.createdAt instanceof Date ? item.createdAt.toISOString() : item.createdAt) || '',
+          (item.updatedAt instanceof Date ? item.updatedAt.toISOString() : item.updatedAt) || '',
         ].map(cell => csvEscape(cell)).join(',');
 
         csv += row + '\n';
       }
 
-      // Build filename - include filter hint if filtered
       const filterSuffix = isFiltered ? '-filtered' : '';
       return new NextResponse(csv, {
         headers: {
@@ -405,7 +423,6 @@ export async function GET(request: NextRequest) {
     }
 
     // Default: JSON format
-    // Compute date range from items
     const itemDates = parsedItems
       .map(i => i.createdAt)
       .filter(Boolean)
@@ -414,7 +431,6 @@ export async function GET(request: NextRequest) {
       ? { oldest: itemDates[0], newest: itemDates[itemDates.length - 1] }
       : { oldest: null, newest: null };
 
-    // Parse template fields safely
     const parsedTemplates = templates.map(t => ({
       ...t,
       variables: safeParseJSON(t.variables),
@@ -423,7 +439,6 @@ export async function GET(request: NextRequest) {
     const exportData: Record<string, unknown> = {
       exportedAt: new Date().toISOString(),
       version: '1.0',
-      // Feature #444: Include filter info in export metadata
       ...(isFiltered ? { filters: appliedFilters, filtered: true } : { filtered: false }),
       items: parsedItems,
       projects: projects.map(p => ({
@@ -452,7 +467,6 @@ export async function GET(request: NextRequest) {
       },
     };
 
-    // Build filename - include filter hint if filtered
     const filterSuffix = isFiltered ? '-filtered' : '';
     return new NextResponse(JSON.stringify(exportData, null, 2), {
       headers: {
@@ -461,11 +475,16 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to export data' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/export]',
-      error,
-    });
+    const { message, status } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : classifyError(error).details;
+    return apiError(
+      message === 'Internal server error' ? 'Failed to export data' : message,
+      status,
+      {
+        details: safeDetails,
+        logPrefix: '[GET /api/export]',
+        error,
+      }
+    );
   }
 }

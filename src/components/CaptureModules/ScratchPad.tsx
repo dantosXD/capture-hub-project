@@ -38,6 +38,10 @@ interface Collaborator {
   lastSeen: number;
 }
 
+const SAVE_DEBOUNCE_MS = 3000;
+const COLLABORATOR_TIMEOUT_MS = 60000;
+const COLLABORATOR_CLEANUP_INTERVAL_MS = 15000;
+
 // Generate a random pastel color for presence
 const randomColor = () => {
   const hue = Math.floor(Math.random() * 360);
@@ -141,7 +145,7 @@ export function ScratchPad({ onComplete, fullPage = false }: ScratchPadProps) {
       } finally {
         setSaving(false);
       }
-    }, 3000);
+    }, SAVE_DEBOUNCE_MS);
   }, [scratchPadId, content, title, tags]);
 
   // ── WebSocket: broadcast content changes ──
@@ -171,7 +175,7 @@ export function ScratchPad({ onComplete, fullPage = false }: ScratchPadProps) {
       lastRemoteUpdateRef.current = data.content;
       setContent(data.content);
     });
-    return cleanup;
+    return typeof cleanup === 'function' ? cleanup : undefined;
   }, [on, socketId]);
 
   // ── WebSocket: presence (join/leave) ──
@@ -232,14 +236,21 @@ export function ScratchPad({ onComplete, fullPage = false }: ScratchPadProps) {
       setCollaborators(prev => {
         const next = new Map(prev);
         for (const [id, collab] of next) {
-          if (now - collab.lastSeen > 60000) {
+          if (now - collab.lastSeen > COLLABORATOR_TIMEOUT_MS) {
             next.delete(id);
           }
         }
         return next;
       });
-    }, 15000);
+    }, COLLABORATOR_CLEANUP_INTERVAL_MS);
     return () => clearInterval(interval);
+  }, []);
+
+  // ── Cleanup debounce timeout on unmount ──
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
   }, []);
 
   // ── Search captures for insert ──

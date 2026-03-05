@@ -253,7 +253,7 @@ export async function POST(request: NextRequest) {
                 changes: {
                   tags: safeParseTags(updated.tags),
                 },
-                updatedAt: updated.updatedAt,
+                updatedAt: updated.updatedAt instanceof Date ? updated.updatedAt.toISOString() : updated.updatedAt,
               });
             } catch (broadcastError) {
               console.error('[POST /api/capture] Tag update broadcast failed (non-fatal):', broadcastError);
@@ -285,8 +285,8 @@ export async function POST(request: NextRequest) {
         reminder: item.reminder,
         reminderSent: item.reminderSent ?? false,
         pinned: item.pinned ?? false,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
+        createdAt: item.createdAt instanceof Date ? item.createdAt.toISOString() : item.createdAt,
+        updatedAt: item.updatedAt instanceof Date ? item.updatedAt.toISOString() : item.updatedAt,
       });
     } catch (broadcastError) {
       console.error('[POST /api/capture] Broadcast failed (non-fatal):', broadcastError);

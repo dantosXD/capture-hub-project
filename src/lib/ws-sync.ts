@@ -23,6 +23,7 @@ export interface SyncData {
 export class WSSyncManager {
   private lastSyncAt: string | null = null;
   private syncCallbacks: Set<(data: SyncData) => void> = new Set();
+  private activeSendFunction: ((type: string, data?: any) => void) | null = null;
 
   /**
    * Get last sync timestamp
@@ -68,6 +69,9 @@ export class WSSyncManager {
    * Request sync from server
    */
   requestSync(sendFunction: (type: string, data?: any) => void): void {
+    // Store send function so requestSyncFrom can use it for pagination
+    this.activeSendFunction = sendFunction;
+
     const since = this.getLastSyncAt() || this.loadLastSyncAt();
 
     console.log(`[WSSyncManager] Requesting sync since: ${since || 'beginning'}`);
@@ -117,12 +121,20 @@ export class WSSyncManager {
   }
 
   /**
-   * Request sync from specific timestamp
+   * Request sync from a specific timestamp (used for pagination when hasMore === true)
    */
   private requestSyncFrom(timestamp: string): void {
-    // This will be called when we have a WebSocket connection
-    // The actual request will be made through the WebSocket send function
-    console.log(`[WSSyncManager] Requesting sync from ${timestamp}`);
+    console.log(`[WSSyncManager] Requesting next page of sync from ${timestamp}`);
+
+    if (!this.activeSendFunction) {
+      console.warn('[WSSyncManager] requestSyncFrom called but no active send function available');
+      return;
+    }
+
+    this.activeSendFunction(WSEventType.SYNC_REQUEST, {
+      since: timestamp,
+      lastSyncAt: timestamp,
+    });
   }
 
   /**

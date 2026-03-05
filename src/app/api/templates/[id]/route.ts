@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 // GET - Get a single template
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { id } = await params;
     const template = await db.template.findUnique({
@@ -28,12 +32,9 @@ export async function GET(
 
     return NextResponse.json({ template });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch template' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/templates/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[GET /api/templates/[id]]', error });
   }
 }
 
@@ -42,6 +43,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { id } = await params;
     const body = await request.json();
@@ -50,10 +54,11 @@ export async function PATCH(
     const template = await db.template.update({
       where: { id },
       data: {
-        ...(name && { name }),
+        // Use !== undefined so empty string is a valid update value
+        ...(name !== undefined && { name }),
         ...(description !== undefined && { description: description || null }),
-        ...(content && { content }),
-        ...(category && { category }),
+        ...(content !== undefined && { content }),
+        ...(category !== undefined && { category }),
         ...(icon !== undefined && { icon: icon || null }),
         ...(variables !== undefined && { variables: variables ? JSON.stringify(variables) : null }),
         ...(isDefault !== undefined && { isDefault }),
@@ -73,12 +78,9 @@ export async function PATCH(
 
     return NextResponse.json({ template });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to update template' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[PATCH /api/templates/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[PATCH /api/templates/[id]]', error });
   }
 }
 
@@ -87,6 +89,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const { id } = await params;
     // Don't allow deletion of default templates
@@ -111,11 +116,8 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to delete template' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[DELETE /api/templates/[id]]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[DELETE /api/templates/[id]]', error });
   }
 }

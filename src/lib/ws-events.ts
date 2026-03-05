@@ -89,25 +89,25 @@ export interface ItemCreatedEvent {
   reminder?: string | null;
   reminderSent?: boolean;
   pinned?: boolean;
-  createdAt: string;
-  updatedAt?: string;
+  createdAt: string | Date;
+  updatedAt?: string | Date;
 }
 
 export interface ItemUpdatedEvent {
   id: string;
   changes: Record<string, any>;
-  updatedAt: string;
+  updatedAt: string | Date;
 }
 
 export interface ItemDeletedEvent {
   id: string;
-  deletedAt: string;
+  deletedAt: string | Date;
 }
 
 export interface ItemBulkUpdateEvent {
   itemIds: string[];
   changes: Record<string, any>;
-  updatedAt: string;
+  updatedAt: string | Date;
 }
 
 /**
@@ -118,18 +118,18 @@ export interface ProjectCreatedEvent {
   name: string;
   color: string;
   status: string;
-  createdAt: string;
+  createdAt: string | Date;
 }
 
 export interface ProjectUpdatedEvent {
   id: string;
   changes: Record<string, any>;
-  updatedAt: string;
+  updatedAt: string | Date;
 }
 
 export interface ProjectDeletedEvent {
   id: string;
-  deletedAt: string;
+  deletedAt: string | Date;
 }
 
 /**
@@ -140,13 +140,13 @@ export interface LinkCreatedEvent {
   sourceId: string;
   targetId: string;
   relationType: string;
-  createdAt: string;
+  createdAt: string | Date;
 }
 
 export interface LinkDeletedEvent {
   sourceId: string;
   targetId: string;
-  deletedAt: string;
+  deletedAt: string | Date;
 }
 
 /**
@@ -154,7 +154,7 @@ export interface LinkDeletedEvent {
  */
 export interface StatsUpdatedEvent {
   type: 'capture' | 'inbox' | 'processing' | 'all';
-  timestamp: string;
+  timestamp: string | Date;
 }
 
 /**

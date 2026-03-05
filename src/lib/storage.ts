@@ -1,10 +1,43 @@
 import fs from 'fs';
 import path from 'path';
 import { pipeline } from 'stream/promises';
+import { Resolver } from 'dns/promises';
 import { loggers } from './logger';
 
 const logger = loggers.api;
 const UPLOADS_DIR = path.join(process.cwd(), 'public', 'uploads', 'images');
+
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+const PRIVATE_IP_RANGES = [
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^::1$/,
+  /^fc00:/,
+  /^fe80:/,
+];
+
+/**
+ * Checks whether a URL resolves to a private or loopback IP address (SSRF protection).
+ * Returns true if the URL is private (and should be blocked).
+ */
+async function isPrivateUrl(url: string): Promise<boolean> {
+  try {
+    const { hostname } = new URL(url);
+    // Reject immediately if hostname itself is a private IP literal
+    if (PRIVATE_IP_RANGES.some(r => r.test(hostname))) return true;
+    const resolver = new Resolver();
+    const addresses = await resolver.resolve4(hostname).catch(() => [] as string[]);
+    return addresses.some(ip => PRIVATE_IP_RANGES.some(r => r.test(ip)));
+  } catch {
+    return true; // Treat unresolvable hosts as private (fail-safe)
+  }
+}
 
 // Ensure upload directory exists
 function ensureUploadDir() {
@@ -15,13 +48,24 @@ function ensureUploadDir() {
 
 /**
  * Downloads an image from a remote URL and saves it to the public uploads folder.
- * Returns the relative relative path to be stored in the database.
+ * Returns the relative path to be stored in the database.
+ *
+ * Security measures applied:
+ * - SSRF protection: rejects private/loopback/link-local IP ranges
+ * - Content-Type validation: only allows known image MIME types
+ * - Size limit: rejects responses larger than 10 MB (via Content-Length header)
  */
 export async function downloadImage(url: string, idPrefix: string = 'capture'): Promise<string | null> {
     if (!url || !url.startsWith('http')) return url; // Already local or invalid
 
     try {
         ensureUploadDir();
+
+        // SSRF protection: reject private/loopback/link-local destinations
+        const isPrivate = await isPrivateUrl(url);
+        if (isPrivate) {
+            throw new Error(`SSRF protection: URL resolves to a private or disallowed address: ${url}`);
+        }
 
         // Create a safe, unique filename
         const urlObj = new URL(url);
@@ -43,6 +87,21 @@ export async function downloadImage(url: string, idPrefix: string = 'capture'): 
 
         if (!response.ok) {
             throw new Error(`Failed to fetch image: ${response.statusText}`);
+        }
+
+        // Size limit check via Content-Length header before downloading body
+        const contentLengthHeader = response.headers.get('content-length');
+        if (contentLengthHeader) {
+            const contentLength = parseInt(contentLengthHeader, 10);
+            if (!isNaN(contentLength) && contentLength > MAX_IMAGE_SIZE_BYTES) {
+                throw new Error(`Image exceeds size limit: ${contentLength} bytes (max ${MAX_IMAGE_SIZE_BYTES})`);
+            }
+        }
+
+        // Content-Type validation against allowlist
+        const contentType = response.headers.get('content-type') || '';
+        if (!ALLOWED_IMAGE_TYPES.some(t => contentType.startsWith(t))) {
+            throw new Error(`Invalid content type: ${contentType}`);
         }
 
         if (!response.body) {

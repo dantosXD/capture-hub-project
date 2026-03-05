@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 /**
  * AI Writing Assistance Endpoint
  * POST /api/scratchpad/ai
- * 
+ *
  * Actions: continue, rewrite, summarize, expand, tone
  */
+
+const MAX_AI_INPUT_CHARS = 50_000;
 
 async function getAICompletion(systemPrompt: string, userContent: string): Promise<string> {
     // Check for AI configuration
@@ -27,8 +30,11 @@ async function getAICompletion(systemPrompt: string, userContent: string): Promi
         });
 
         return result.choices[0]?.message?.content?.trim() || '';
-    } catch (error: any) {
-        console.error('[AI Writing] Completion failed:', error?.message);
+    } catch (error) {
+        const { message, details } = classifyError(error);
+        const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+        // Log the failure but fall back to mock response
+        apiError(message, 500, { details: safeDetails, logPrefix: '[AI Writing] Completion failed', error });
         return getMockResponse(systemPrompt);
     }
 }
@@ -63,6 +69,9 @@ const ACTION_PROMPTS: Record<string, string> = {
 };
 
 export async function POST(request: NextRequest) {
+    const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'standard' });
+    if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
     try {
         const body = await request.json();
         const { action, text, selectedText, context } = body;
@@ -72,6 +81,17 @@ export async function POST(request: NextRequest) {
                 { error: `Invalid action. Supported: ${Object.keys(ACTION_PROMPTS).join(', ')}` },
                 { status: 400 }
             );
+        }
+
+        // Length caps on AI input fields
+        if (text && typeof text === 'string' && text.length > MAX_AI_INPUT_CHARS) {
+            return apiError('Input too long', 400, { details: 'Maximum 50,000 characters' });
+        }
+        if (selectedText && typeof selectedText === 'string' && selectedText.length > MAX_AI_INPUT_CHARS) {
+            return apiError('Input too long', 400, { details: 'Maximum 50,000 characters' });
+        }
+        if (context && typeof context === 'string' && context.length > MAX_AI_INPUT_CHARS) {
+            return apiError('Input too long', 400, { details: 'Maximum 50,000 characters' });
         }
 
         const inputText = selectedText || text;
@@ -95,8 +115,10 @@ export async function POST(request: NextRequest) {
             isMock: !process.env.ZAI_API_KEY && !process.env.OPENAI_API_KEY,
         });
     } catch (error) {
-        const classified = classifyError(error);
-        return apiError(classified.message, classified.status, {
+        const { message, status, details } = classifyError(error);
+        const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+        return apiError(message, status, {
+            details: safeDetails,
             logPrefix: '[POST /api/scratchpad/ai]',
             error,
         });

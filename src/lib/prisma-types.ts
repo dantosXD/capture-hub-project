@@ -16,8 +16,6 @@ export type {
   Template,
   ItemLink,
   ConnectedDevice,
-  User,
-  Post,
 } from '@prisma/client';
 
 // Convenience type aliases for common use cases

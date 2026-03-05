@@ -28,7 +28,6 @@ export default defineConfig({
     teardownTimeout: 10000,
     isolate: true,
     pool: 'threads',
-    singleThread: false,
   },
   resolve: {
     alias: {

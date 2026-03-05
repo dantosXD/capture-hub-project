@@ -69,7 +69,7 @@ export function classifyError(error: unknown): { message: string; status: number
     'code' in error &&
     'clientVersion' in error
   ) {
-    const prismaError = error as { code: string; message: string; meta?: Record<string, unknown> };
+    const prismaError = error as unknown as { code: string; message: string; meta?: Record<string, unknown> };
 
     switch (prismaError.code) {
       case 'P2002': // Unique constraint violation

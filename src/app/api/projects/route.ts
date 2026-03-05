@@ -3,52 +3,56 @@ import { db, withRetry } from '@/lib/db';
 import { getProjectsWithCounts } from '@/lib/query-optimized';
 import { broadcastProjectCreated } from '@/lib/ws-broadcast';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest, validateBody } from '@/lib/api-security';
+import { CreateProjectSchema } from '@/lib/validation-schemas';
 
 // GET - Get all projects
 export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     const projects = await getProjectsWithCounts();
 
     return NextResponse.json({ projects });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch projects' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/projects]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[GET /api/projects]', error });
   }
 }
 
 // POST - Create a new project
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
+  const body = await validateBody(request, CreateProjectSchema);
+  if (body instanceof NextResponse) return body;
+
   try {
-    const body = await request.json();
     const { name, description, color, icon, status, priority, dueDate } = body;
 
-    if (!name || !name.trim()) {
-      return NextResponse.json({ error: 'Project name is required' }, { status: 400 });
-    }
-
-    // Use withRetry for better concurrency handling
+    // Use withRetry + db.$transaction to atomically get max order and insert
     const project = await withRetry(async () => {
-      // Get the max order
-      const maxOrderProject = await db.project.findFirst({
-        orderBy: { order: 'desc' },
-        select: { order: true },
-      });
+      return db.$transaction(async (tx) => {
+        const maxOrderProject = await tx.project.findFirst({
+          orderBy: { order: 'desc' },
+          select: { order: true },
+        });
 
-      return db.project.create({
-        data: {
-          name: name.trim(),
-          description: description || null,
-          color: color || '#6366f1',
-          icon: icon || null,
-          status: status || 'active',
-          priority: priority || 'medium',
-          dueDate: dueDate || null,
-          order: (maxOrderProject?.order || 0) + 1,
-        },
+        return tx.project.create({
+          data: {
+            name: name.trim(),
+            description: description || null,
+            color: color || '#6366f1',
+            icon: icon || null,
+            status: status || 'active',
+            priority: priority || 'medium',
+            dueDate: dueDate || null,
+            order: (maxOrderProject?.order || 0) + 1,
+          },
+        });
       });
     });
 
@@ -67,11 +71,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ project }, { status: 201 });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to create project' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[POST /api/projects]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError(message, status, { details: safeDetails, logPrefix: '[POST /api/projects]', error });
   }
 }

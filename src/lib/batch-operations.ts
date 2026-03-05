@@ -23,25 +23,27 @@ export async function batchUpdateItems(params: {
 }) {
   const { ids, updates } = params;
 
-  // Use a single transaction for all updates
+  // Wrap all batches in a single transaction so all succeed or none do
   return withRetry(async () => {
     // Update items in batches (SQLite handles up to 999 variables per query)
     const batchSize = 100;
     const results: Array<{ count: number }> = [];
 
-    for (let i = 0; i < ids.length; i += batchSize) {
-      const batchIds = ids.slice(i, i + batchSize);
-      const batch = await db.captureItem.updateMany({
-        where: {
-          id: { in: batchIds },
-        },
-        data: {
-          ...updates,
-          // updatedAt handled by @updatedAt
-        },
-      });
-      results.push(batch);
-    }
+    await db.$transaction(async (tx) => {
+      for (let i = 0; i < ids.length; i += batchSize) {
+        const batchIds = ids.slice(i, i + batchSize);
+        const batch = await tx.captureItem.updateMany({
+          where: {
+            id: { in: batchIds },
+          },
+          data: {
+            ...updates,
+            // updatedAt handled by @updatedAt
+          },
+        });
+        results.push(batch);
+      }
+    });
 
     return results;
   });
@@ -149,7 +151,7 @@ export async function batchArchiveItems(ids: string[]) {
 }
 
 /**
- * Bulk create items with error handling
+ * Bulk create items atomically — all items are created or none are.
  */
 export async function bulkCreateItems(
   items: Array<{
@@ -163,21 +165,11 @@ export async function bulkCreateItems(
 ) {
   return withRetry(async () => {
     const now = new Date().toISOString();
-    const results = {
-      created: 0,
-      failed: 0,
-      errors: [] as Array<{ index: number; error: string }>,
-    };
 
-    // Create items in batches
-    const batchSize = 50;
-    for (let i = 0; i < items.length; i += batchSize) {
-      const batch = items.slice(i, i + batchSize);
-
-      for (let j = 0; j < batch.length; j++) {
-        const item = batch[j];
-        try {
-          await db.captureItem.create({
+    return await db.$transaction(async (tx) => {
+      return Promise.all(
+        items.map(item =>
+          tx.captureItem.create({
             data: {
               type: item.type,
               title: item.title,
@@ -188,19 +180,10 @@ export async function bulkCreateItems(
               createdAt: now,
               updatedAt: now,
             },
-          });
-          results.created++;
-        } catch (error) {
-          results.failed++;
-          results.errors.push({
-            index: i + j,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          });
-        }
-      }
-    }
-
-    return results;
+          })
+        )
+      );
+    });
   });
 }
 

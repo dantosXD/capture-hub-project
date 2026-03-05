@@ -5,9 +5,13 @@ import { broadcastItemCreated, broadcastItemUpdated, broadcastStatsUpdated } fro
 import { safeParseTags, safeParseJSON } from '@/lib/parse-utils';
 import type { CaptureItemWhereInput } from '@/lib/prisma-types';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 // GET - List all capture items
 export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status ?? 500 });
+
   try {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get('type');
@@ -110,21 +114,18 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to fetch items' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/capture]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    return apiError(message, status, { details: process.env.NODE_ENV === 'production' ? undefined : details, logPrefix: '[GET /api/capture]', error });
   }
 }
 
 // POST - Create new capture item
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status ?? 500 });
+
   try {
-    console.log('[POST /api/capture] Starting request');
     const body = await request.json();
-    console.log('[POST /api/capture] Request body parsed:', { title: body.title, type: body.type });
 
     const {
       type = 'note',
@@ -182,7 +183,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('[POST /api/capture] Creating database item');
+    // Validate dueDate is a valid ISO date string if provided
+    if (dueDate !== undefined && dueDate !== null) {
+      const parsedDate = new Date(dueDate);
+      if (isNaN(parsedDate.getTime())) {
+        return NextResponse.json(
+          { error: 'dueDate must be a valid ISO date string' },
+          { status: 400 }
+        );
+      }
+    }
+
     const now = new Date().toISOString();
 
     // Start with user-provided tags (or empty array)
@@ -206,56 +217,9 @@ export async function POST(request: NextRequest) {
         projectId: projectId || null,
       },
     });
-    console.log('[POST /api/capture] Database item created:', item.id);
 
-    // Async: Auto-suggest tags and merge with user tags (non-blocking)
-    if (content) {
-      console.log('[POST /api/capture] Starting async AI tag suggestion');
-      // Don't await - let it run in background
-      suggestTags(content, title)
-        .then((aiTags) => {
-          // Merge AI tags with user tags (avoid duplicates)
-          const mergedTags = [...new Set([...userTags, ...aiTags])];
-
-          // Only update if AI suggested new tags
-          if (aiTags.length > 0 && JSON.stringify(mergedTags) !== JSON.stringify(userTags)) {
-            console.log('[POST /api/capture] AI tags suggested, updating item:', aiTags);
-            return db.captureItem.update({
-              where: { id: item.id },
-              data: {
-                tags: JSON.stringify(mergedTags),
-              },
-            });
-          }
-          console.log('[POST /api/capture] No new AI tags to add');
-          return null;
-        })
-        .then((updated) => {
-          if (updated) {
-            console.log('[POST /api/capture] Item updated with AI tags');
-            // Broadcast update when tags are added
-            try {
-              broadcastItemUpdated({
-                id: item.id,
-                changes: {
-                  tags: safeParseTags(updated.tags),
-                },
-                updatedAt: updated.updatedAt,
-              });
-            } catch (broadcastError) {
-              console.error('[POST /api/capture] Tag update broadcast failed (non-fatal):', broadcastError);
-            }
-          }
-        })
-        .catch((aiError) => {
-          // If AI fails, log warning but don't affect the response
-          console.warn('[POST /api/capture] AI tag suggestion failed (non-fatal):', aiError);
-        });
-    }
-
-    // Broadcast full item to all connected clients (non-blocking)
+    // Broadcast full item to all connected clients immediately with user tags (non-blocking)
     // Send complete item data so clients can add it directly to their lists
-    console.log('[POST /api/capture] Broadcasting item created');
     try {
       broadcastItemCreated({
         id: item.id,
@@ -275,15 +239,56 @@ export async function POST(request: NextRequest) {
         reminder: item.reminder,
         reminderSent: item.reminderSent ?? false,
         pinned: item.pinned ?? false,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
+        createdAt: item.createdAt instanceof Date ? item.createdAt.toISOString() : item.createdAt,
+        updatedAt: item.updatedAt instanceof Date ? item.updatedAt.toISOString() : item.updatedAt,
       });
     } catch (broadcastError) {
       console.error('[POST /api/capture] Broadcast failed (non-fatal):', broadcastError);
     }
 
+    // Async: Auto-suggest tags and merge with user tags (non-blocking)
+    // broadcastItemCreated is sent immediately above; broadcastItemUpdated is sent once AI tags arrive
+    if (content) {
+      // Don't await - let it run in background
+      suggestTags(content, title)
+        .then((aiTags) => {
+          // Merge AI tags with user tags (avoid duplicates)
+          const mergedTags = [...new Set([...userTags, ...aiTags])];
+
+          // Only update if AI suggested new tags
+          if (aiTags.length > 0 && JSON.stringify(mergedTags) !== JSON.stringify(userTags)) {
+            return db.captureItem.update({
+              where: { id: item.id },
+              data: {
+                tags: JSON.stringify(mergedTags),
+              },
+            });
+          }
+          return null;
+        })
+        .then((updated) => {
+          if (updated) {
+            // Broadcast ITEM_UPDATED once AI tags have been persisted
+            try {
+              broadcastItemUpdated({
+                id: item.id,
+                changes: {
+                  tags: safeParseTags(updated.tags),
+                },
+                updatedAt: updated.updatedAt instanceof Date ? updated.updatedAt.toISOString() : updated.updatedAt,
+              });
+            } catch (broadcastError) {
+              console.error('[POST /api/capture] Tag update broadcast failed (non-fatal):', broadcastError);
+            }
+          }
+        })
+        .catch((aiError) => {
+          // If AI fails, log warning but don't affect the response
+          console.warn('[POST /api/capture] AI tag suggestion failed (non-fatal):', aiError);
+        });
+    }
+
     // Broadcast stats update (non-blocking)
-    console.log('[POST /api/capture] Broadcasting stats updated');
     try {
       broadcastStatsUpdated({
         type: 'capture',
@@ -293,18 +298,13 @@ export async function POST(request: NextRequest) {
       console.error('[POST /api/capture] Stats broadcast failed (non-fatal):', broadcastError);
     }
 
-    console.log('[POST /api/capture] Sending response');
     return NextResponse.json({
       ...item,
       tags: userTags,
       metadata: metadata || null,
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError(classified.message === 'Internal server error' ? 'Failed to create item' : classified.message, classified.status, {
-      details: classified.details,
-      logPrefix: '[POST /api/capture]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    return apiError(message, status, { details: process.env.NODE_ENV === 'production' ? undefined : details, logPrefix: '[POST /api/capture]', error });
   }
 }

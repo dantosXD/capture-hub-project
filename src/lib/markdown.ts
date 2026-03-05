@@ -1,3 +1,5 @@
+import { escapeHtml } from './sanitization';
+
 /**
  * Strip markdown formatting from text for plain text display
  * Handles common markdown patterns: headers, bold, italic, links, code, lists
@@ -30,6 +32,15 @@ export function stripMarkdown(text: string): string {
     // Clean up extra whitespace
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Strip markdown and escape any surviving HTML tags to prevent XSS
+ * Safe for use in plain-text contexts where HTML must not be rendered
+ */
+export function safeStripMarkdown(text: string): string {
+  const stripped = stripMarkdown(text);
+  return escapeHtml(stripped);
 }
 
 /**

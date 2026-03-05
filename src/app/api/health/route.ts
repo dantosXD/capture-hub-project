@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { isWebSocketServerRunning, getConnectedDevicesCount } from "@/lib/websocket";
 import { apiError, classifyError } from "@/lib/api-route-handler";
@@ -7,8 +7,12 @@ import { getEmbeddingStats } from "@/ai/embedding-pipeline";
 import { getRAGStatus } from "@/ai/rag-engine";
 import { detectDatabaseProvider } from "@/lib/db-config";
 import { isAIConfigured } from "@/lib/ai";
+import { validateRequest } from "@/lib/api-security";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: false, rateLimitPreset: 'read' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status });
+
   try {
     let dbStatus = "disconnected";
     let tables: string[] = [];
@@ -28,6 +32,14 @@ export async function GET() {
     const wsStatus = wsRunning ? "running" : "not_running";
     const connectedDevices = getConnectedDevicesCount();
 
+    const overallStatus = dbStatus === "connected" ? "healthy" : "degraded";
+
+    // In production, strip sensitive infrastructure details from response
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ status: overallStatus, timestamp: new Date().toISOString() });
+    }
+
+    // In development, return full details
     // AI provider status (Project Omni P4)
     const aiProvider = getProviderStatus();
     const embeddingStats = getEmbeddingStats();
@@ -37,7 +49,7 @@ export async function GET() {
     const dbProvider = detectDatabaseProvider();
 
     return NextResponse.json({
-      status: "healthy",
+      status: overallStatus,
       database: {
         status: dbStatus,
         provider: dbProvider,
@@ -61,11 +73,8 @@ export async function GET() {
       }
     });
   } catch (error) {
-    const classified = classifyError(error);
-    return apiError('Health check failed', classified.status, {
-      details: classified.details,
-      logPrefix: '[GET /api/health]',
-      error,
-    });
+    const { message, status, details } = classifyError(error);
+    const safeDetails = process.env.NODE_ENV === 'production' ? undefined : details;
+    return apiError('Health check failed', status, { details: safeDetails, logPrefix: '[GET /api/health]', error });
   }
 }
