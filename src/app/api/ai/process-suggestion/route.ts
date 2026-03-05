@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import ZAI from 'z-ai-web-dev-sdk';
 import { safeParseTags } from '@/lib/parse-utils';
 import { apiError, classifyError } from '@/lib/api-route-handler';
+import { validateRequest } from '@/lib/api-security';
 
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 
@@ -14,6 +15,9 @@ async function getZAI() {
 }
 
 export async function POST(request: NextRequest) {
+  const security = await validateRequest(request, { requireCsrf: true, rateLimitPreset: 'write' });
+  if (!security.success) return NextResponse.json({ error: security.error }, { status: security.status ?? 500 });
+
   try {
     const body = await request.json();
     const { itemId } = body;

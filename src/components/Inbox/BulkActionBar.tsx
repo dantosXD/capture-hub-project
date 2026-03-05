@@ -71,6 +71,7 @@ export function BulkActionBar({
       setLoadingProjects(true);
       try {
         const response = await fetch('/api/projects');
+        if (!response.ok) throw new Error(`Failed to load projects (${response.status})`);
         const data = await response.json();
         setProjects(data.projects || []);
       } catch (error) {

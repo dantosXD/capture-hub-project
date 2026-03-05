@@ -344,14 +344,17 @@ ${item.sourceUrl ? `Source: ${item.sourceUrl}\n` : ''}Captured: ${safeFormatAbso
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to clear due date');
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.error || `Failed to clear due date (${response.status})`);
+      }
 
       setDueDate(null);
       setReminder(null);
       toast.success('Due date cleared');
       onUpdate();
-    } catch {
-      toast.error('Failed to clear due date');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to clear due date');
     }
   };
 

@@ -213,10 +213,14 @@ export async function PUT(
       metadata: safeParseJSON((updateData.metadata as string | null | undefined) ?? existingItem.metadata),
     };
 
-    // Broadcast update to all connected clients
+    // Broadcast update to all connected clients (with parsed tags/metadata for consumers)
     broadcastItemUpdated({
       id,
-      changes: updateData,
+      changes: {
+        ...updateData,
+        ...(updateData.tags !== undefined ? { tags: safeParseTags(updateData.tags as string) } : {}),
+        ...(updateData.metadata !== undefined ? { metadata: safeParseJSON(updateData.metadata as string | null) } : {}),
+      },
       updatedAt,
     });
 
