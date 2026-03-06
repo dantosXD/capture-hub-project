@@ -17,12 +17,59 @@ const CSRF_SECRET = process.env.CSRF_SECRET || randomBytes(32).toString('hex');
  */
 const ALLOWED_ORIGINS = new Set<string>();
 
+function normalizeOrigin(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function getFirstHeaderValue(value: string | null): string | null {
+  if (!value) return null;
+
+  const first = value.split(',')[0]?.trim();
+  return first || null;
+}
+
+function addAllowedOrigin(value: string | null | undefined): void {
+  const normalized = normalizeOrigin(value);
+  if (normalized) {
+    ALLOWED_ORIGINS.add(normalized);
+  }
+}
+
+export function getExpectedRequestOrigin(request: Request): string | null {
+  const forwardedProto = getFirstHeaderValue(request.headers.get('x-forwarded-proto'));
+  const forwardedHost = getFirstHeaderValue(request.headers.get('x-forwarded-host'));
+
+  if (forwardedProto && forwardedHost) {
+    return normalizeOrigin(`${forwardedProto}://${forwardedHost}`);
+  }
+
+  const host = getFirstHeaderValue(request.headers.get('host'));
+  if (host) {
+    try {
+      const url = new URL(request.url);
+      return normalizeOrigin(`${url.protocol}//${host}`);
+    } catch {
+      return null;
+    }
+  }
+
+  return normalizeOrigin(request.url);
+}
+
 /**
  * Initialize allowed origins from environment variable
  * Format: comma-separated list of origins
  * Example: http://localhost:3000,https://capturehub.example.com
  */
 export function initAllowedOrigins(): void {
+  ALLOWED_ORIGINS.clear();
+
   const envOrigins = process.env.ALLOWED_ORIGINS || '';
   const defaultOrigins = [
     'http://localhost:3000',
@@ -34,20 +81,18 @@ export function initAllowedOrigins(): void {
 
   if (envOrigins) {
     envOrigins.split(',').forEach(origin => {
-      ALLOWED_ORIGINS.add(origin.trim());
+      addAllowedOrigin(origin.trim());
     });
   } else {
     // In development, allow all localhost origins
     if (process.env.NODE_ENV === 'development') {
-      defaultOrigins.forEach(origin => ALLOWED_ORIGINS.add(origin));
+      defaultOrigins.forEach(origin => addAllowedOrigin(origin));
     }
   }
 
-  // Always add the app URL if configured (server-only env var, no NEXT_PUBLIC_ prefix)
-  const appUrl = process.env.APP_URL;
-  if (appUrl) {
-    ALLOWED_ORIGINS.add(appUrl);
-  }
+  // Prefer the server-only app URL, but retain NEXT_PUBLIC_APP_URL as a deployment fallback.
+  addAllowedOrigin(process.env.APP_URL);
+  addAllowedOrigin(process.env.NEXT_PUBLIC_APP_URL);
 }
 
 // Initialize on module load
@@ -59,8 +104,9 @@ initAllowedOrigins();
  * @param origin - The Origin header value
  * @returns true if origin is allowed, false otherwise
  */
-export function isAllowedOrigin(origin: string | null): boolean {
-  if (!origin) return false;
+export function isAllowedOrigin(origin: string | null, request?: Request): boolean {
+  const normalizedOrigin = normalizeOrigin(origin);
+  if (!normalizedOrigin) return false;
 
   // Explicit dev bypass via env var (no unconditional localhost bypass)
   if (process.env.CSRF_DEV_BYPASS === 'true') {
@@ -70,13 +116,21 @@ export function isAllowedOrigin(origin: string | null): boolean {
   // In development, allow any localhost / 127.0.0.1 origin regardless of port
   // (covers browser preview proxies, dev tools, etc.)
   if (process.env.NODE_ENV === 'development') {
-    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+    if (normalizedOrigin.startsWith('http://localhost:') || normalizedOrigin.startsWith('http://127.0.0.1:')) {
+      return true;
+    }
+  }
+
+  // Always allow the request's own origin, even when the app sits behind a reverse proxy.
+  if (request) {
+    const expectedOrigin = getExpectedRequestOrigin(request);
+    if (expectedOrigin && normalizedOrigin === expectedOrigin) {
       return true;
     }
   }
 
   // Exact match
-  if (ALLOWED_ORIGINS.has(origin)) {
+  if (ALLOWED_ORIGINS.has(normalizedOrigin)) {
     return true;
   }
 
@@ -89,13 +143,13 @@ export function isAllowedOrigin(origin: string | null): boolean {
  * @param referer - The Referer header value
  * @returns true if referer is from allowed origin, false otherwise
  */
-export function isAllowedReferer(referer: string | null): boolean {
+export function isAllowedReferer(referer: string | null, request?: Request): boolean {
   if (!referer) return false;
 
   try {
     const url = new URL(referer);
     const origin = `${url.protocol}//${url.host}`;
-    return isAllowedOrigin(origin);
+    return isAllowedOrigin(origin, request);
   } catch {
     return false;
   }
@@ -149,7 +203,7 @@ export function validateCsrf(request: Request): {
     };
   }
 
-  if (!isAllowedOrigin(origin)) {
+  if (!isAllowedOrigin(origin, request)) {
     return {
       valid: false,
       error: `Origin not allowed: ${origin}`,

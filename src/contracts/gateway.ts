@@ -27,7 +27,7 @@ import { API_CONTRACTS, type ApiContractKey } from './api';
 import { validateRequest, validateBody, validateQuery } from '@/lib/api-security';
 import { classifyError } from '@/lib/api-route-handler';
 import { RateLimitPresets } from '@/lib/rate-limit';
-import { getAllSecurityHeaders } from '@/lib/csrf';
+import { getAllSecurityHeaders, getRequestOrigin } from '@/lib/csrf';
 
 // ============================================================================
 // Gateway Context (passed to every handler)
@@ -190,7 +190,7 @@ export function gateway<K extends ApiContractKey>(
     const correlationId = request.headers.get('x-correlation-id') || requestId;
 
     // Get security headers
-    const origin = request.headers.get('origin') || request.headers.get('referer');
+    const origin = getRequestOrigin(request);
     const securityHeaders = {
       ...getAllSecurityHeaders(origin),
       'X-Request-Id': requestId,
@@ -295,7 +295,7 @@ export function gateway<K extends ApiContractKey>(
 
 export function gatewayOptions() {
   return async (request: NextRequest): Promise<NextResponse> => {
-    const origin = request.headers.get('origin') || request.headers.get('referer');
+    const origin = getRequestOrigin(request);
     return new NextResponse(null, {
       status: 204,
       headers: {

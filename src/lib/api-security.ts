@@ -9,6 +9,7 @@ import { z } from 'zod';
 import {
   validateCsrf,
   getAllSecurityHeaders,
+  getRequestOrigin,
 } from './csrf';
 import {
   rateLimitMiddleware,
@@ -109,13 +110,6 @@ export async function validateRequest(request: NextRequest, options: {
     },
     rateLimit: rateLimitResult.rateLimit,
   };
-}
-
-/**
- * Get origin from request for CORS headers
- */
-function getRequestOrigin(request: NextRequest): string | null {
-  return request.headers.get('origin') || request.headers.get('referer');
 }
 
 /**
