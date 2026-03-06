@@ -128,8 +128,14 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
@@ -138,7 +144,7 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -162,6 +168,9 @@ jobs:
       url: https://capturehub.sustainablegrowthlabs.com
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Validate deployment configuration
         shell: bash
         run: |
