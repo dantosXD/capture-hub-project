@@ -161,3 +161,16 @@ model AppConfig {
   @@index([visionAIConnectionId])
   @@index([embeddingAIConnectionId])
 }
+
+model RuntimeEnvOverride {
+  key            String   @id
+  valueText      String?
+  valueEncrypted String?
+  valueHint      String?
+  isSecret       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([isSecret])
+  @@index([updatedAt])
+}

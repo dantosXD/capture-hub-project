@@ -18,6 +18,7 @@ export type {
   ConnectedDevice,
   AIConnection,
   AppConfig,
+  RuntimeEnvOverride,
   AIProviderType,
   AIHealthStatus,
 } from '@prisma/client';
@@ -60,6 +61,11 @@ export type AIConnectionUpdateInput = Prisma.AIConnectionUncheckedUpdateInput;
 export type AppConfigWhereInput = Prisma.AppConfigWhereInput;
 export type AppConfigCreateInput = Prisma.AppConfigUncheckedCreateInput;
 export type AppConfigUpdateInput = Prisma.AppConfigUncheckedUpdateInput;
+
+// Runtime environment override types
+export type RuntimeEnvOverrideWhereInput = Prisma.RuntimeEnvOverrideWhereInput;
+export type RuntimeEnvOverrideCreateInput = Prisma.RuntimeEnvOverrideUncheckedCreateInput;
+export type RuntimeEnvOverrideUpdateInput = Prisma.RuntimeEnvOverrideUncheckedUpdateInput;
 
 // SortOrder re-export for convenience
 export type SortOrder = Prisma.SortOrder;

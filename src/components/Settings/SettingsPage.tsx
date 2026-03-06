@@ -54,6 +54,34 @@ type Routing = {
   embeddingAIConnectionId: string | null;
   aiFallbackEnabled: boolean;
 };
+type EnvironmentVariableKey =
+  | 'OPENAI_BASE_URL'
+  | 'OPENAI_API_KEY'
+  | 'OPENAI_CHAT_MODEL'
+  | 'OPENAI_MODEL'
+  | 'OPENAI_VISION_MODEL'
+  | 'OPENAI_EMBEDDING_MODEL'
+  | 'ZAI_BASE_URL'
+  | 'ZAI_API_KEY'
+  | 'ZAI_CHAT_MODEL'
+  | 'ZAI_MODEL'
+  | 'ZAI_VISION_MODEL';
+type EnvironmentVariable = {
+  key: EnvironmentVariableKey;
+  label: string;
+  description: string;
+  group: 'openai' | 'zai';
+  isSecret: boolean;
+  effectiveValue: string | null;
+  source: 'override' | 'environment' | 'default' | 'unset';
+  hasOverride: boolean;
+  configured: boolean;
+  hint: string | null;
+  defaultValue: string | null;
+  draftValue: string;
+  clearOverride: boolean;
+  forceUnset: boolean;
+};
 
 const APP_VERSION = '0.2.0';
 
@@ -65,6 +93,17 @@ const themeOptions: Array<{ value: ThemeOption; label: string; icon: typeof Sun;
 
 function hydrateConnection(connection: Omit<Connection, 'apiKey' | 'clearApiKey'>): Connection {
   return { ...connection, apiKey: '', clearApiKey: false };
+}
+
+function hydrateEnvironmentVariable(
+  variable: Omit<EnvironmentVariable, 'draftValue' | 'clearOverride' | 'forceUnset'>,
+): EnvironmentVariable {
+  return {
+    ...variable,
+    draftValue: variable.isSecret ? '' : variable.effectiveValue ?? '',
+    clearOverride: false,
+    forceUnset: variable.source === 'override' && !variable.configured,
+  };
 }
 
 function fromPreset(preset: Preset): Connection {
@@ -95,6 +134,14 @@ function healthVariant(status: Connection['lastHealthStatus']) {
   return 'outline';
 }
 
+function environmentSourceLabel(variable: EnvironmentVariable): string {
+  if (variable.source === 'override' && !variable.configured) return 'Override clears host value';
+  if (variable.source === 'override') return 'Settings override';
+  if (variable.source === 'environment') return 'Host environment';
+  if (variable.source === 'default') return 'Built-in default';
+  return 'Not set';
+}
+
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { reconnect } = useWebSocket();
@@ -102,6 +149,7 @@ export function SettingsPage() {
   const [savingDevice, setSavingDevice] = useState(false);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [routing, setRouting] = useState<Routing>({ defaultAIConnectionId: null, visionAIConnectionId: null, embeddingAIConnectionId: null, aiFallbackEnabled: true });
+  const [environmentVariables, setEnvironmentVariables] = useState<EnvironmentVariable[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState('ollama');
   const [newConnection, setNewConnection] = useState<Connection | null>(null);
@@ -110,6 +158,7 @@ export function SettingsPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [savingRouting, setSavingRouting] = useState(false);
+  const [savingEnvironment, setSavingEnvironment] = useState(false);
   const [importPayload, setImportPayload] = useState<Record<string, unknown> | null>(null);
   const [importPreview, setImportPreview] = useState<any>(null);
   const [importFileName, setImportFileName] = useState('');
@@ -119,6 +168,18 @@ export function SettingsPage() {
   const [clearing, setClearing] = useState(false);
 
   const databaseConnections = useMemo(() => connections.filter((connection) => connection.source === 'database' && connection.enabled), [connections]);
+  const environmentGroups = useMemo(() => ([
+    { id: 'openai' as const, label: 'OpenAI-Compatible Env', description: 'These runtime values back the built-in OpenAI-compatible environment connection.' },
+    { id: 'zai' as const, label: 'ZAI Env', description: 'These runtime values back the built-in ZAI environment connection.' },
+  ]), []);
+  const environmentDirty = useMemo(() => environmentVariables.some((variable) => {
+    if (variable.clearOverride) return true;
+    if (variable.isSecret) {
+      const unsetActive = variable.source === 'override' && !variable.configured;
+      return variable.draftValue.trim().length > 0 || variable.forceUnset !== unsetActive;
+    }
+    return variable.draftValue.trim() !== (variable.effectiveValue ?? '');
+  }), [environmentVariables]);
 
   const loadAI = async () => {
     setLoadingAI(true);
@@ -128,6 +189,7 @@ export function SettingsPage() {
       if (!response.ok) throw new Error(data.error || 'Failed to load AI settings');
       setConnections((data.connections || []).map(hydrateConnection));
       setRouting(data.routing);
+      setEnvironmentVariables((data.environment?.variables || []).map(hydrateEnvironmentVariable));
       setPresets(data.presets || []);
       setEncryptionAvailable(Boolean(data.encryptionAvailable));
       const preset = (data.presets || []).find((entry: Preset) => entry.id === selectedPresetId) || data.presets?.[0];
@@ -176,10 +238,74 @@ export function SettingsPage() {
   };
 
   const changeConnection = (id: string, patch: Partial<Connection>) => setConnections((current) => current.map((connection) => connection.id === id ? { ...connection, ...patch } : connection));
+  const changeEnvironmentVariable = (key: EnvironmentVariableKey, patch: Partial<EnvironmentVariable>) => {
+    setEnvironmentVariables((current) => current.map((variable) => variable.key === key ? { ...variable, ...patch } : variable));
+  };
   const pickPreset = (presetId: string) => {
     setSelectedPresetId(presetId);
     const preset = presets.find((entry) => entry.id === presetId);
     if (preset) setNewConnection(fromPreset(preset));
+  };
+
+  const saveEnvironmentVariables = async () => {
+    const updates: Array<{ key: EnvironmentVariableKey; value?: string; clearOverride?: boolean }> = [];
+
+    for (const variable of environmentVariables) {
+      if (variable.clearOverride) {
+        updates.push({ key: variable.key, clearOverride: true });
+        continue;
+      }
+
+      if (variable.isSecret) {
+        const unsetActive = variable.source === 'override' && !variable.configured;
+        if (variable.forceUnset) {
+          updates.push({ key: variable.key, value: '' });
+          continue;
+        }
+
+        const nextValue = variable.draftValue.trim();
+        if (nextValue) {
+          updates.push({ key: variable.key, value: nextValue });
+          continue;
+        }
+
+        if (unsetActive) {
+          updates.push({ key: variable.key, clearOverride: true });
+        }
+        continue;
+      }
+
+      const nextValue = variable.draftValue.trim();
+      const currentValue = variable.effectiveValue ?? '';
+      if (nextValue === currentValue) {
+        continue;
+      }
+
+      updates.push({ key: variable.key, value: nextValue });
+    }
+
+    if (updates.length === 0) {
+      toast.message('No AI environment changes to save');
+      return;
+    }
+
+    setSavingEnvironment(true);
+    try {
+      const response = await fetch('/api/settings/ai/environment', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variables: updates }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to save AI environment settings');
+      setEnvironmentVariables((data.environment?.variables || []).map(hydrateEnvironmentVariable));
+      toast.success('AI environment settings saved');
+      await loadAI();
+    } catch (error) {
+      toast.error('Failed to save AI environment settings', { description: error instanceof Error ? error.message : 'Unknown error' });
+    } finally {
+      setSavingEnvironment(false);
+    }
   };
 
   const persistConnection = async (connection: Connection, isNew = false) => {
@@ -352,6 +478,118 @@ export function SettingsPage() {
           <section className="space-y-4">
             <div className="flex items-center gap-2"><Bot className="h-5 w-5 text-muted-foreground" /><h3 className="text-lg font-semibold">AI Configuration</h3></div>
             {!encryptionAvailable && <Card className="border-amber-500/30 bg-amber-500/10"><CardContent className="flex gap-3 py-4 text-sm"><ShieldAlert className="h-5 w-5 text-amber-600 dark:text-amber-300" /><div><div className="font-medium">`APP_ENCRYPTION_KEY` is not configured</div><div className="text-muted-foreground">Database-backed API keys cannot be stored yet. Local endpoints without keys and environment-backed connections still work.</div></div></CardContent></Card>}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Runtime AI environment</CardTitle>
+                <CardDescription>Change AI env-style values live from Settings. These overrides apply immediately and survive restarts.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-start gap-3 rounded-xl border bg-muted/20 p-4 text-sm">
+                  <Sparkles className="mt-0.5 h-4 w-4 text-indigo-500" />
+                  <div className="space-y-1">
+                    <div className="font-medium">Live AI overrides</div>
+                    <div className="text-muted-foreground">Use this when you want to swap providers, models, or API keys without editing host env files. Clearing a saved override falls back to the host env or built-in default.</div>
+                  </div>
+                </div>
+
+                {loadingAI ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading AI environment settings...</div>
+                ) : (
+                  <div className="space-y-6">
+                    {environmentGroups.map((group) => {
+                      const variables = environmentVariables.filter((variable) => variable.group === group.id);
+                      if (variables.length === 0) return null;
+
+                      return (
+                        <div key={group.id} className="space-y-4">
+                          <div>
+                            <div className="font-medium">{group.label}</div>
+                            <div className="text-sm text-muted-foreground">{group.description}</div>
+                          </div>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            {variables.map((variable) => (
+                              <div key={variable.key} className="rounded-xl border p-4">
+                                <div className="space-y-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Label className="font-mono text-xs">{variable.label}</Label>
+                                    <Badge variant={variable.source === 'override' ? 'default' : 'outline'}>{environmentSourceLabel(variable)}</Badge>
+                                    {variable.hasOverride && <Badge variant="secondary">Override Saved</Badge>}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground">{variable.description}</p>
+                                </div>
+
+                                <div className="mt-3 space-y-3">
+                                  <Input
+                                    type={variable.isSecret ? 'password' : 'text'}
+                                    value={variable.draftValue}
+                                    disabled={variable.clearOverride || (variable.isSecret && variable.forceUnset)}
+                                    onChange={(event) => changeEnvironmentVariable(variable.key, { draftValue: event.target.value })}
+                                    placeholder={variable.isSecret
+                                      ? variable.source === 'override'
+                                        ? variable.configured
+                                          ? `Override configured (${variable.hint || 'configured'})`
+                                          : 'Override currently clears the host value'
+                                        : variable.configured
+                                        ? `${environmentSourceLabel(variable)}${variable.hint ? ` (${variable.hint})` : ''}`
+                                        : 'Not set'
+                                      : variable.defaultValue || 'Not set'}
+                                  />
+
+                                  <div className="space-y-2 text-xs text-muted-foreground">
+                                    {!variable.isSecret && variable.effectiveValue && <div>Current value: {variable.effectiveValue}</div>}
+                                    {!variable.isSecret && variable.source === 'default' && variable.defaultValue && <div>Default: {variable.defaultValue}</div>}
+                                    {variable.isSecret && variable.configured && <div>Current value is hidden{variable.hint ? ` (${variable.hint})` : ''}.</div>}
+                                  </div>
+
+                                  {variable.isSecret && (
+                                    <div className="flex items-center gap-2">
+                                      <Switch
+                                        checked={variable.forceUnset}
+                                        onCheckedChange={(checked) => changeEnvironmentVariable(variable.key, {
+                                          forceUnset: checked,
+                                          clearOverride: checked ? false : variable.clearOverride,
+                                          draftValue: checked ? '' : variable.draftValue,
+                                        })}
+                                      />
+                                      <Label>Override to empty</Label>
+                                    </div>
+                                  )}
+
+                                  {variable.hasOverride && (
+                                    <div className="flex items-center gap-2">
+                                      <Switch
+                                        checked={variable.clearOverride}
+                                        onCheckedChange={(checked) => changeEnvironmentVariable(variable.key, {
+                                          clearOverride: checked,
+                                          forceUnset: checked ? false : variable.forceUnset,
+                                        })}
+                                      />
+                                      <Label>Clear saved override</Label>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <div className="flex flex-wrap gap-3">
+                      <Button onClick={saveEnvironmentVariables} disabled={!environmentDirty || savingEnvironment} className="gap-2">
+                        {savingEnvironment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        Save Runtime AI Env
+                      </Button>
+                      <Button variant="outline" onClick={() => void loadAI()} disabled={savingEnvironment || loadingAI} className="gap-2">
+                        <RefreshCw className="h-4 w-4" />
+                        Reload
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader><CardTitle className="text-base">Add connection</CardTitle><CardDescription>OpenAI-compatible cloud or local runtimes plus legacy ZAI.</CardDescription></CardHeader>
