@@ -178,10 +178,13 @@ jobs:
           test -n "${{ vars.CAPROVER_APP_NAME }}" || { echo "Missing repository variable CAPROVER_APP_NAME"; exit 1; }
           test -n "${{ secrets.CAPROVER_APP_TOKEN }}" || { echo "Missing repository secret CAPROVER_APP_TOKEN"; exit 1; }
 
+      - name: Package source for CapRover
+        shell: bash
+        run: git archive --format=tar --output=deploy.tar HEAD
+
       - name: Deploy to CapRover
         uses: caprover/deploy-from-github@v1.1.2
         with:
           server: "${{ vars.CAPROVER_SERVER }}"
           app: "${{ vars.CAPROVER_APP_NAME }}"
           token: "${{ secrets.CAPROVER_APP_TOKEN }}"
-          branch: "${{ github.ref_name }}"
