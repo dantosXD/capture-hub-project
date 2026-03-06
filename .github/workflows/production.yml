@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: dantosxd/capture-hub-project
 
 jobs:
   # =============================================================================
@@ -111,9 +111,10 @@ jobs:
             NODE_ENV=production
 
       - name: Image size check
+        shell: bash
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          IMAGE_SIZE=$(docker images ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest --format "{{.Size}}")
+          docker pull "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          IMAGE_SIZE=$(docker images "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" --format "{{.Size}}")
           echo "Image size: $IMAGE_SIZE"
           echo "::notice::Docker image built successfully. Size: $IMAGE_SIZE"
 
@@ -161,9 +162,6 @@ jobs:
       url: https://capturehub.sustainablegrowthlabs.com
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Validate deployment configuration
         shell: bash
         run: |
@@ -171,13 +169,10 @@ jobs:
           test -n "${{ vars.CAPROVER_APP_NAME }}" || { echo "Missing repository variable CAPROVER_APP_NAME"; exit 1; }
           test -n "${{ secrets.CAPROVER_APP_TOKEN }}" || { echo "Missing repository secret CAPROVER_APP_TOKEN"; exit 1; }
 
-      - name: Create deployment tarball
-        run: git archive --format=tar HEAD -o deploy.tar
-
       - name: Deploy to CapRover
         uses: caprover/deploy-from-github@v1.1.2
         with:
           server: "${{ vars.CAPROVER_SERVER }}"
           app: "${{ vars.CAPROVER_APP_NAME }}"
           token: "${{ secrets.CAPROVER_APP_TOKEN }}"
-          tarFile: deploy.tar
+          branch: "${{ github.ref_name }}"
