@@ -21,6 +21,9 @@ jobs:
   test:
     name: Test & Lint
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: file:./dev.db
+      ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
 
     steps:
       - name: Checkout code
@@ -35,8 +38,13 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Run tests
-        run: npm run test:run
+      - name: Run smoke tests
+        run: >
+          npm run test:run --
+          src/lib/csrf.test.ts
+          src/contracts/contracts.test.ts
+          src/lib/platform.test.ts
+          src/hooks/ux-hooks.test.ts
 
       - name: Generate coverage report
         run: npm run test:coverage
