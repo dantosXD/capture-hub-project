@@ -156,8 +156,8 @@ export class ZAIProvider implements AIProvider {
       throw new Error('ZAI API key not configured');
     }
 
-    const module = await import('z-ai-web-dev-sdk');
-    const ZAI = module.default as any;
+    const sdkModule = await import('z-ai-web-dev-sdk');
+    const ZAI = sdkModule.default as any;
 
     return new ZAI({
       baseUrl: config.baseUrl,
